@@ -249,18 +249,24 @@ namespace Plugin.BLE.Windows
         public override bool SupportsIsConnectable { get => true; }
 
         protected override DeviceBondState GetBondState()
-        {
-            try
-            {
-                DeviceInformation deviceInformation = DeviceInformation.CreateFromIdAsync(NativeDevice.DeviceId).AsTask().Result;
-                return deviceInformation.Pairing.IsPaired ? DeviceBondState.Bonded : DeviceBondState.NotBonded;                
-            }
-            catch (Exception ex)
-            {
-                Trace.Message($"GetBondState exception for {NativeDevice.DeviceId} : {ex.Message}");
-                return DeviceBondState.NotSupported;
-            }
-        }
+		{
+			if (NativeDevice == null)
+				Trace.Message($"Device was Disposed but application still has a reference, not good");
+			else
+			{
+				try
+				{
+					DeviceInformation deviceInformation = DeviceInformation.CreateFromIdAsync(NativeDevice.DeviceId).AsTask().Result;
+					return deviceInformation.Pairing.IsPaired ? DeviceBondState.Bonded : DeviceBondState.NotBonded;
+				}
+				catch (Exception ex)
+				{
+					Trace.Message($"GetBondState failed for {Name ?? Id.ToString()} : {ex.Message}");
+				}
+			}
+
+			return DeviceBondState.NotSupported;
+		}
 
         public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default)
         {
