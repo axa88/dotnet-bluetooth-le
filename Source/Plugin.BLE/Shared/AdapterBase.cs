@@ -302,7 +302,7 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Handle disconnection of a device.
 	/// </summary>
-	public void HandleDisconnectedDevice(bool disconnectRequested, IDevice device)
+		public void HandleDisconnectedDevice(bool disconnectRequested, IDevice device, string message = "")
 	{
 		if (disconnectRequested)
 		{
@@ -311,11 +311,12 @@ public abstract class AdapterBase : IAdapter
 		}
 		else
 		{
-			Trace.Message($"DisconnectedPeripheral by lost signal: {device.Name}");
-			DeviceConnectionLost?.Invoke(this, new() { Device = device });
+				string m = !string.IsNullOrWhiteSpace(message) ? message : "DisconnectedPeripheral by lost signal";
+				Trace.Message($"{m}: {device.Name}");
+				DeviceConnectionLost?.Invoke(this, new DeviceErrorEventArgs { Device = device, ErrorMessage = m });
 
-			if (DiscoveredDevicesRegistry.TryRemove(device.Id, out _))
-				Trace.Message($"Removed device from discovered devices list: {device.Name}");
+				if (DiscoveredDevicesRegistry.TryRemove(device.Id, out _))
+					Trace.Message("Removed device from discovered devices list: {0}", device.Name);
 		}
 	}
 

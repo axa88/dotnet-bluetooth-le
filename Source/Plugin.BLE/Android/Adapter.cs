@@ -39,6 +39,20 @@ public class Adapter : AdapterBase//, IPairable
 		_bluetoothManager = bluetoothManager;
 		_bluetoothAdapter = bluetoothManager.Adapter;
 
+		// Issue: #822, #883 Sync ConnectedDevices and Device.State with Bluetooth.State, for when the radio is disabled, all devices disconnect.
+		var bluetoothStateChanged = new BluetoothStatusBroadcastReceiver(state =>
+		{
+			if (state is BluetoothState.Off)
+			{
+				foreach (var connectedDevice in ConnectedDeviceRegistry)
+					HandleDisconnectedDevice(false, connectedDevice.Value, "Device Disconnects when Bluetooth is Disabled");
+
+				ConnectedDeviceRegistry.Clear();
+			}
+		});
+		_ = Application.Context.RegisterReceiver(bluetoothStateChanged, new IntentFilter(BluetoothAdapter.ActionStateChanged));
+
+		//bonding
 		var bondStatusBroadcastReceiver = new BondStatusBroadcastReceiver(this);
 		Application.Context.RegisterReceiver(bondStatusBroadcastReceiver, new(BluetoothDevice.ActionBondStateChanged));
 
