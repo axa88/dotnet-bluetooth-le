@@ -236,7 +236,7 @@ public class Device : DeviceBase<BluetoothLEDevice>
 
 	public override bool SupportsIsConnectable => true;
 
-        protected override DeviceBondState GetBondState()
+		protected override DeviceBondState GetBondState()
 		{
 			if (NativeDevice == null)
 				Trace.Message($"Device was Disposed but application still has a reference, not good");

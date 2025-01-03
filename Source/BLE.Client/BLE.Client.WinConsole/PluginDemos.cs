@@ -109,7 +109,10 @@ namespace BLE.Client.WinConsole
 			Write($"{nameof(_selectedDevice.BondState)}: {_selectedDevice.BondState}");
 			Write($"{nameof(_selectedDevice.Rssi)}: {_selectedDevice.Rssi}");
 			Write($"{nameof(_selectedDevice.AdvertisementRecords)}: {_selectedDevice.AdvertisementRecords.Count}");
-			Write($"Bonded: {_adapter.BondedDevices.Contains(_selectedDevice)}");
+			if (_adapter is IBondReportable bondReportable)
+				Write($"Bonded: {(bondReportable.BondedDevices.Contains(_selectedDevice))}");
+			else
+				Write($"No Bond info");
 		}
 
 		public async Task ConnectSelected()
@@ -359,14 +362,6 @@ namespace BLE.Client.WinConsole
 			Write("Test_Connect_Disconnect done");
 		}
 
-		public async Task BondAsync()
-		{
-			string bleaddress = BleAddressSelector.GetBleAddress();
-			var id = bleaddress.ToBleDeviceGuid();
-			IDevice dev = await _adapter.ConnectToKnownDeviceAsync(id);
-			await _adapter.BondAsync(dev);
-		}
-
 		 #region New Bonding
 
 		public async Task PairNone() => await Bond(PairModes.None);
@@ -462,11 +457,13 @@ namespace BLE.Client.WinConsole
 
 		public Task GetBondedDevices()
 		{
-			int idx = 0;
-			foreach (var dev in _adapter.BondedDevices)
+			if (_adapter is IBondReportable bondReportable)
 			{
-				Write($"{idx++} Bonded device: {dev.Name} : {dev.Id}");
+				var i = 0;
+				foreach (var dev in bondReportable.BondedDevices)
+					Write($"{i++} Bonded device: {dev.Name} : {dev.Id}");
 			}
+
 			return Task.FromResult(true);
 		}
 
@@ -641,7 +638,7 @@ namespace BLE.Client.WinConsole
 
 		public Task RunGetSystemConnectedOrPairedDevices()
 		{
-			IReadOnlyList<IDevice> devs = _adapter.GetSystemConnectedOrPairedDevices();
+			IReadOnlyList<IDevice> devs = _adapter.GetConnectedOrBondedDevices();
 			Task.Delay(200);
 			Write($"GetSystemConnectedOrPairedDevices found {devs.Count} devices:");
 			foreach (var dev in devs)

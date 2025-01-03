@@ -247,7 +247,7 @@ namespace BLE.Client.ViewModels
                 // remove the GUID filter for test
                 // Avoid to loose already IDevice with a connection, otherwise you can't close it
                 // Keep the reference of already known devices and drop all not in returned list.
-                var pairedOrConnectedDeviceWithNullGatt = Adapter.GetSystemConnectedOrPairedDevices();
+                var pairedOrConnectedDeviceWithNullGatt = Adapter.GetConnectedOrBondedDevices();
                 SystemDevices.RemoveAll(sd => !pairedOrConnectedDeviceWithNullGatt.Any(p => p.Id == sd.Id));
                 SystemDevices.AddRange(pairedOrConnectedDeviceWithNullGatt.Where(d => !SystemDevices.Any(sd => sd.Id == d.Id)).Select(d => new DeviceListItemViewModel(d)));
                 RaisePropertyChanged(() => SystemDevices);

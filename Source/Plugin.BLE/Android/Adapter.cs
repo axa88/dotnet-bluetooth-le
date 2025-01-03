@@ -14,6 +14,7 @@ using Java.Util;
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Abstractions.Contracts.Pairing;
+using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Android.Extensions;
 using Plugin.BLE.BroadcastReceivers;
 using Plugin.BLE.Extensions;
@@ -24,14 +25,13 @@ using Trace = Plugin.BLE.Abstractions.Trace;
 
 namespace Plugin.BLE.Android;
 
-public class Adapter : AdapterBase//, IPairable
+public class Adapter : AdapterBase, IBondReportable, IBondable
 {
 	private readonly BluetoothManager _bluetoothManager;
 	private readonly BluetoothAdapter _bluetoothAdapter;
 	private readonly Api18BleScanCallback _api18ScanCallback;
 	private readonly Api21BleScanCallback _api21ScanCallback;
 
-	private readonly Dictionary<string, TaskCompletionSource<bool>> _bondingTcsForAddress = [];
 	private readonly Dictionary<string, TaskCompletionSource<BondResult>> _bondingTaskSources = [];
 
 	public Adapter(BluetoothManager bluetoothManager)
@@ -50,19 +50,16 @@ public class Adapter : AdapterBase//, IPairable
 				ConnectedDeviceRegistry.Clear();
 			}
 		});
-		_ = Application.Context.RegisterReceiver(bluetoothStateChanged, new IntentFilter(BluetoothAdapter.ActionStateChanged));
+		_ = Application.Context.RegisterReceiver(bluetoothStateChanged, new (BluetoothAdapter.ActionStateChanged));
 
-		//bonding
 		var bondStatusBroadcastReceiver = new BondStatusBroadcastReceiver(this);
-		Application.Context.RegisterReceiver(bondStatusBroadcastReceiver, new(BluetoothDevice.ActionBondStateChanged));
+		_ = Application.Context.RegisterReceiver(bondStatusBroadcastReceiver, new(BluetoothDevice.ActionBondStateChanged));
 
 		bondStatusBroadcastReceiver.BondStateChanged += (_, args) =>
 		{
-			OnDeviceBondStateChanged(args);
+			DeviceBondStateChanged?.Invoke(this, args);
 
 			var address = args.Address;
-
-			// new bonding
 			if (_bondingTaskSources.TryGetValue(address, out var tcsResult))
 			{
 				if (args.State != DeviceBondState.Bonding)
@@ -72,56 +69,12 @@ public class Adapter : AdapterBase//, IPairable
 					tcsResult.TrySetResult(bondResult);
 				}
 			}
-
-			// old bonding
-			if (_bondingTcsForAddress.TryGetValue(address, out var tcs))
-			{
-				switch (args.State)
-				{
-					case DeviceBondState.Bonding: return;
-					case DeviceBondState.Bonded:
-						tcs.TrySetResult(true);
-					break;
-				}
-
-				tcs.TrySetException(new Exception("Bonding failed."));
-			}
 		};
 
 		if (Build.VERSION.SdkInt >= BuildVersionCodes.Lollipop)
 			_api21ScanCallback = new(this);
 		else
 			_api18ScanCallback = new(this);
-	}
-
-	public override Task BondAsync(IDevice device)
-	{
-		if (device == null)
-			throw new ArgumentNullException(nameof(device));
-
-		if (device.NativeDevice is not BluetoothDevice nativeDevice)
-			throw new ArgumentException("Invalid device type");
-
-		if (nativeDevice.BondState == Bond.Bonded)
-			return Task.CompletedTask;
-
-		var deviceAddress = nativeDevice.Address!;
-		if (_bondingTcsForAddress.TryGetValue(deviceAddress, out var tcs))
-		{
-			tcs.TrySetException(new Exception("Bonding failed on old try."));
-			_bondingTcsForAddress.Remove(deviceAddress);
-		}
-
-		var taskCompletionSource = new TaskCompletionSource<bool>();
-		_bondingTcsForAddress.Add(nativeDevice.Address!, taskCompletionSource);
-
-		if (!nativeDevice.CreateBond())
-		{
-			_bondingTcsForAddress.Remove(nativeDevice.Address);
-			throw new("Bonding failed");
-		}
-
-		return taskCompletionSource.Task;
 	}
 
 	protected override Task StartScanningForDevicesNativeAsync(ScanFilterOptions scanFilterOptions, bool allowDuplicatesKey, CancellationToken scanCancellationToken)
@@ -223,9 +176,9 @@ public class Adapter : AdapterBase//, IPairable
 
 		#if NET6_0_OR_GREATER
 		if (OperatingSystem.IsAndroidVersionAtLeast(23))
-			#else
-			if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
-			#endif
+		#else
+		if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
+		#endif
 		{
 			// set the match mode on Android 6 and above
 			ssb.SetMatchMode(ScanMatchMode.ToNative());
@@ -241,9 +194,9 @@ public class Adapter : AdapterBase//, IPairable
 
 		#if NET6_0_OR_GREATER
 		if (OperatingSystem.IsAndroidVersionAtLeast(26))
-			#else
-			if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-			#endif
+		#else
+		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+		#endif
 		{
 			// enable Bluetooth 5 Advertisement Extensions on Android 8.0 and above
 			ssb.SetLegacy(false);
@@ -294,13 +247,11 @@ public class Adapter : AdapterBase//, IPairable
 		return Task.CompletedTask;
 	}
 
-	protected override void DisconnectDeviceNative(IDevice device)
-	{
-		//make sure everything is disconnected
-		((Device)device).Disconnect();
-	}
+	protected override void DisconnectDeviceNative(IDevice device) => ((Device)device).Disconnect(); //make sure everything is disconnected
 
-	public override async Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters, CancellationToken cancellationToken)
+	// ReSharper disable OptionalParameterHierarchyMismatch
+	protected override async Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters, CancellationToken cancellationToken)
+	// ReSharper restore OptionalParameterHierarchyMismatch
 	{
 		var macBytes = deviceGuid.ToByteArray().Skip(10).Take(6).ToArray();
 		var nativeDevice = _bluetoothAdapter.GetRemoteDevice(macBytes);
@@ -314,156 +265,62 @@ public class Adapter : AdapterBase//, IPairable
 		return device;
 	}
 
-	public override IReadOnlyList<IDevice> GetSystemConnectedOrPairedDevices(Guid[] services = null)
+	public override IReadOnlyList<IDevice> GetConnectedOrBondedDevices(Guid[] services = null)
 	{
 		if (services != null)
 			Trace.Message("Caution: GetSystemConnectedDevices does not take into account the 'services' parameter on Android.");
 
-		//add dualMode type also as they are BLE as well ;)
-		var connectedDevices = _bluetoothManager.GetConnectedDevices(ProfileType.Gatt).Where(d => d.SupportsBLE());
-
-		var bondedDevices = _bluetoothAdapter.BondedDevices.Where(d => d.SupportsBLE());
-
+		//add dualMode type also as they are BLE as well)
+		var connectedDevices = (_bluetoothManager.GetConnectedDevices(ProfileType.Gatt) ?? new List<BluetoothDevice>()).Where(d => d.SupportsBLE());
+		var bondedDevices = (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(d => d.SupportsBLE());
 		return connectedDevices.Union(bondedDevices, new DeviceComparer()).Select(d => new Device(this, d, null)).Cast<IDevice>().ToList();
 	}
 
-	public override IReadOnlyList<IDevice> GetKnownDevicesByIds(Guid[] ids)
-	{
-		var devices = GetSystemConnectedOrPairedDevices();
-		return devices.Where(item => ids.Contains(item.Id)).ToList();
-	}
-
-	protected override IReadOnlyList<IDevice> GetBondedDevices()
-	{
-		var bondedDevices = _bluetoothAdapter.BondedDevices.Where(d => d.SupportsBLE());
-		return bondedDevices.Select(d => new Device(this, d, null, 0)).Cast<IDevice>().ToList();
-	}
+	public override IReadOnlyList<IDevice> GetConnectedOrBondedDevicesByIds(Guid[] ids) => GetConnectedOrBondedDevices().Where(item => ids.Contains(item.Id)).ToList();
 
 	public override bool SupportsExtendedAdvertising()
 	{
 		#if NET6_0_OR_GREATER
 		if (OperatingSystem.IsAndroidVersionAtLeast(26))
 		#else
-			if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
 		#endif
-		{
 			return _bluetoothAdapter.IsLeExtendedAdvertisingSupported;
-		}
 		else
-		{
 			return false;
-		}
 	}
 
-	public override bool SupportsCodedPHY()
+	public override bool SupportsCodedPhy()
 	{
 		#if NET6_0_OR_GREATER
 		if (OperatingSystem.IsAndroidVersionAtLeast(26))
 		#else
-			if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
 		#endif
-		{
 			return _bluetoothAdapter.IsLeCodedPhySupported;
-		}
 		else
-		{
 			return false;
-		}
 	}
 
 
 	private class DeviceComparer : IEqualityComparer<BluetoothDevice>
 	{
-		public bool Equals(BluetoothDevice x, BluetoothDevice y) => x.Address == y.Address;
+		public bool Equals(BluetoothDevice x, BluetoothDevice y) => x?.Address == y?.Address;
 
 		public int GetHashCode(BluetoothDevice obj) => obj.GetHashCode();
 	}
 
+	#region Implementation of IBondReportable
 
-	public class Api18BleScanCallback(Adapter adapter) : Object, BluetoothAdapter.ILeScanCallback
-	{
-		private readonly Adapter _adapter = adapter;
+	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
 
-		public void OnLeScan(BluetoothDevice bleDevice, int rssi, byte[] scanRecord)
-		{
-			Trace.Message("Adapter.LeScanCallback: " + bleDevice.Name);
-			_adapter.HandleDiscoveredDevice(new Device(_adapter, bleDevice, null, rssi, scanRecord)); // No IsConnectable!
-		}
-	}
+	public IReadOnlyList<IDevice> BondedDevices => (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(static d => d.SupportsBLE()).Select(d => new Device(this, d, null)).Cast<IDevice>().ToList();
 
-	public class Api21BleScanCallback(Adapter adapter) : ScanCallback
-	{
-		private readonly Adapter _adapter = adapter;
+	#endregion
 
-		public override void OnScanFailed(ScanFailure errorCode)
-		{
-			Trace.Message("Adapter: Scan failed with code {0}", errorCode);
-			base.OnScanFailed(errorCode);
-		}
+	#region Implementation of IBondable
 
-		public override void OnScanResult(ScanCallbackType callbackType, ScanResult result)
-		{
-			base.OnScanResult(callbackType, result);
-
-			/* Might want to transition to parsing the API21+ ScanResult, but sort of a pain for now
-			List<AdvertisementRecord> records = new List<AdvertisementRecord>();
-			records.Add(new AdvertisementRecord(AdvertisementRecordType.Flags, BitConverter.GetBytes(result.ScanRecord.AdvertiseFlags)));
-			if (!string.IsNullOrEmpty(result.ScanRecord.DeviceName))
-			{
-				records.Add(new AdvertisementRecord(AdvertisementRecordType.CompleteLocalName, Encoding.UTF8.GetBytes(result.ScanRecord.DeviceName)));
-			}
-			for (int i = 0; i < result.ScanRecord.ManufacturerSpecificData.Size(); i++)
-			{
-				int key = result.ScanRecord.ManufacturerSpecificData.KeyAt(i);
-				var arr = result.ScanRecord.GetManufacturerSpecificData(key);
-				byte[] data = new byte[arr.Length + 2];
-				BitConverter.GetBytes((ushort)key).CopyTo(data,0);
-				arr.CopyTo(data, 2);
-				records.Add(new AdvertisementRecord(AdvertisementRecordType.ManufacturerSpecificData, data));
-			}
-
-			foreach(var uuid in result.ScanRecord.ServiceUuids)
-			{
-				records.Add(new AdvertisementRecord(AdvertisementRecordType.UuidsIncomplete128Bit, uuid.Uuid.));
-			}
-
-			foreach(var key in result.ScanRecord.ServiceData.Keys)
-			{
-				records.Add(new AdvertisementRecord(AdvertisementRecordType.ServiceData, result.ScanRecord.ServiceData));
-			}*/
-
-			var device = new Device(_adapter, result.Device, null, result.Rssi, result.ScanRecord.GetBytes(),
-				#if NET6_0_OR_GREATER
-				OperatingSystem.IsAndroidVersionAtLeast(26)
-				#else
-				(Build.VERSION.SdkInt >= BuildVersionCodes.O)
-				#endif
-				? result.IsConnectable : true
-			);
-
-			//Device device;
-			//if (result.ScanRecord.ManufacturerSpecificData.Size() > 0)
-			//{
-			//    int key = result.ScanRecord.ManufacturerSpecificData.KeyAt(0);
-			//    byte[] mdata = result.ScanRecord.GetManufacturerSpecificData(key);
-			//    byte[] mdataWithKey = new byte[mdata.Length + 2];
-			//    BitConverter.GetBytes((ushort)key).CopyTo(mdataWithKey, 0);
-			//    mdata.CopyTo(mdataWithKey, 2);
-			//    device = new Device(result.Device, null, null, result.Rssi, mdataWithKey);
-			//}
-			//else
-			//{
-			//    device = new Device(result.Device, null, null, result.Rssi, new byte[0]);
-			//}
-
-			_adapter.HandleDiscoveredDevice(device);
-		}
-	}
-
-
-	#region Implementation of IPairable
-
-	public Task<BondResult> BondAsync(IDevice device, BondingOptions bondingOptions) // ToDo Remove unused BondingOptions parameter when old Bonding is be removed
+	public Task<BondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default)
 	{
 		// ToDo: should these return a failed result instead?
 		if (device == null)
@@ -504,4 +361,88 @@ public class Adapter : AdapterBase//, IPairable
 	}
 
 	#endregion
+
+	public class Api18BleScanCallback(Adapter adapter) : Object, BluetoothAdapter.ILeScanCallback
+	{
+		public void OnLeScan(BluetoothDevice bleDevice, int rssi, byte[] scanRecord)
+		{
+			Trace.Message("Adapter.LeScanCallback: " + bleDevice?.Name);
+			adapter.HandleDiscoveredDevice(new Device(adapter, bleDevice, null, rssi, scanRecord)); // No IsConnectable!
+		}
+	}
+
+	public class Api21BleScanCallback(Adapter adapter) : ScanCallback
+	{
+		public override void OnScanFailed(ScanFailure errorCode)
+		{
+			Trace.Message("Adapter: Scan failed with code {0}", errorCode);
+			base.OnScanFailed(errorCode);
+		}
+
+		public override void OnScanResult(ScanCallbackType callbackType, ScanResult result)
+		{
+			if (result?.Device is null)
+			{
+				Trace.Message($"scan result or its device return null");
+				return;
+			}
+
+			base.OnScanResult(callbackType, result);
+
+			/* Might want to transition to parsing the API21+ ScanResult, but sort of a pain for now
+			List<AdvertisementRecord> records = new List<AdvertisementRecord>();
+			records.Add(new AdvertisementRecord(AdvertisementRecordType.Flags, BitConverter.GetBytes(result.ScanRecord.AdvertiseFlags)));
+			if (!string.IsNullOrEmpty(result.ScanRecord.DeviceName))
+			{
+				records.Add(new AdvertisementRecord(AdvertisementRecordType.CompleteLocalName, Encoding.UTF8.GetBytes(result.ScanRecord.DeviceName)));
+			}
+			for (int i = 0; i < result.ScanRecord.ManufacturerSpecificData.Size(); i++)
+			{
+				int key = result.ScanRecord.ManufacturerSpecificData.KeyAt(i);
+				var arr = result.ScanRecord.GetManufacturerSpecificData(key);
+				byte[] data = new byte[arr.Length + 2];
+				BitConverter.GetBytes((ushort)key).CopyTo(data,0);
+				arr.CopyTo(data, 2);
+				records.Add(new AdvertisementRecord(AdvertisementRecordType.ManufacturerSpecificData, data));
+			}
+
+			foreach(var uuid in result.ScanRecord.ServiceUuids)
+			{
+				records.Add(new AdvertisementRecord(AdvertisementRecordType.UuidsIncomplete128Bit, uuid.Uuid.));
+			}
+
+			foreach(var key in result.ScanRecord.ServiceData.Keys)
+			{
+				records.Add(new AdvertisementRecord(AdvertisementRecordType.ServiceData, result.ScanRecord.ServiceData));
+			}*/
+
+			var device = new Device(adapter, result.Device, null, result.Rssi, result.ScanRecord?.GetBytes(),
+				// ReSharper disable SimplifyConditionalTernaryExpression
+				#if NET6_0_OR_GREATER
+				OperatingSystem.IsAndroidVersionAtLeast(26)
+				#else
+				(Build.VERSION.SdkInt >= BuildVersionCodes.O)
+				#endif
+					? result.IsConnectable : true
+				// ReSharper restore SimplifyConditionalTernaryExpression
+			);
+
+			//Device device;
+			//if (result.ScanRecord.ManufacturerSpecificData.Size() > 0)
+			//{
+			//    int key = result.ScanRecord.ManufacturerSpecificData.KeyAt(0);
+			//    byte[] mdata = result.ScanRecord.GetManufacturerSpecificData(key);
+			//    byte[] mdataWithKey = new byte[mdata.Length + 2];
+			//    BitConverter.GetBytes((ushort)key).CopyTo(mdataWithKey, 0);
+			//    mdata.CopyTo(mdataWithKey, 2);
+			//    device = new Device(result.Device, null, null, result.Rssi, mdataWithKey);
+			//}
+			//else
+			//{
+			//    device = new Device(result.Device, null, null, result.Rssi, new byte[0]);
+			//}
+
+			adapter.HandleDiscoveredDevice(device);
+		}
+	}
 }

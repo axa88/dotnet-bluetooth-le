@@ -1,9 +1,28 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Plugin.BLE.Abstractions.EventArgs;
+
 
 namespace Plugin.BLE.Abstractions.Contracts.Pairing;
+
+public interface IBondReportable
+{
+	/// <summary>
+	/// Occurs when the bonding state of a device changed
+	/// Android: Supported
+	/// iOS: Not supported
+	/// Windows: Not supported
+	/// </summary>
+	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
+
+	/// <summary>
+	/// List of currently bonded devices.
+	/// </summary>
+	public IReadOnlyList<IDevice> BondedDevices { get; }
+}
 
 /// <summary>
 /// Indicate an <see cref="IAdapter"/> is able to programmatically request device Bonding, and is compatible with Xplatform Bonding signatures and optional pairing parameters and results.
@@ -43,14 +62,12 @@ public interface IPairProcess
 		public string Pin { get; } = pin;
 	}
 
-
 	/// <summary>
 	/// Use to Accept the pairing response when the negotiated mode either:
 	/// <see cref="PairModes.Consent"/>,
 	/// <see cref="PairModes.ConfirmPinMatch"/>,
 	/// </summary>
 	public class ConfirmPairResponse : IPairResponse;
-
 
 	/// <summary>
 	/// Use to Accept a pairing response when the negotiated mode is:
@@ -61,7 +78,6 @@ public interface IPairProcess
 	{
 		public string Pin { get; } = pin;
 	}
-
 
 	/// <summary>
 	/// Use to Accept a pairing response when the negotiated mode is:
@@ -76,7 +92,6 @@ public interface IPairProcess
 		public string UserName { get; } = userName;
 		public string Resource { get; } = resource;
 	}
-
 
 	public interface IPairResponse;
 }
@@ -99,7 +114,7 @@ public class BondingOptions(PairModes requestedModes = PairModes.None, Protectio
 /// </summary>
 /// <param name="status"> Result status. This depends on platforms cooperation in reporting.
 /// In addition to success, Windows and Android to a lesser extent may report information on failure </param>
-/// <param name="detail"> String representation of the <see cref="BondResult.Status" </param>
+/// <param name="detail"> String representation of the <see cref="BondResult.Status" /> </param>
 /// <param name="protectionUsed"> The negotiated protection level (Authentication and or Encryption) used for communication with the remote device </param>
 public class BondResult(DeviceBondStatus status, string detail = "", ProtectionLevel protectionUsed = ProtectionLevel.Unused)
 {

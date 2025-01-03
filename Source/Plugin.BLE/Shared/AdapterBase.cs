@@ -10,6 +10,8 @@ using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Exceptions;
 using Plugin.BLE.Abstractions.Utils;
 
+
+// ReSharper disable once CheckNamespace
 namespace Plugin.BLE.Abstractions;
 
 /// <summary>
@@ -21,10 +23,12 @@ public abstract class AdapterBase : IAdapter
 	private volatile bool _isScanning;
 	private Func<IDevice, bool> _currentScanDeviceFilter;
 
+	#region Discovery
+
 	/// <summary>
-	/// Occurs when the adapter receives an advertisement.
+	/// Occurs when the scan has been stopped due the timeout after <see cref="ScanTimeout"/> ms.
 	/// </summary>
-	public event EventHandler<DeviceEventArgs> DeviceAdvertised;
+	public event EventHandler ScanTimeoutElapsed;
 
 	/// <summary>
 	/// Occurs when the adapter receives an advertisement for the first time of the current scan run.
@@ -33,34 +37,9 @@ public abstract class AdapterBase : IAdapter
 	public event EventHandler<DeviceEventArgs> DeviceDiscovered;
 
 	/// <summary>
-	/// Occurs when a device has been connected.
+	/// Occurs when the adapter receives an advertisement.
 	/// </summary>
-	public event EventHandler<DeviceEventArgs> DeviceConnected;
-
-	/// <summary>
-	/// Occurs when a device has been disconnected. This occurs on intended disconnects after <see cref="DisconnectDeviceAsync"/>.
-	/// </summary>
-	public event EventHandler<DeviceEventArgs> DeviceDisconnected;
-
-	/// <summary>
-	/// Occurs when a device has been disconnected. This occurs on unintended disconnects (e.g. when the device exploded).
-	/// </summary>
-	public event EventHandler<DeviceErrorEventArgs> DeviceConnectionLost;
-
-	/// <summary>
-	/// Occurs when the connection to a device fails.
-	/// </summary>
-	public event EventHandler<DeviceErrorEventArgs> DeviceConnectionError;
-
-	/// <summary>
-	/// Occurs when the bonding state of a device changed.
-	/// </summary>
-	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
-
-	/// <summary>
-	/// Occurs when the scan has been stopped due the timeout after <see cref="ScanTimeout"/> ms.
-	/// </summary>
-	public event EventHandler ScanTimeoutElapsed;
+	public event EventHandler<DeviceEventArgs> DeviceAdvertised;
 
 	/// <summary>
 	/// Indicates, if the adapter is scanning for devices.
@@ -87,31 +66,6 @@ public abstract class AdapterBase : IAdapter
 	/// Scan match mode defines how aggressively we look for adverts
 	/// </summary>
 	public ScanMatchMode ScanMatchMode { get; set; } = ScanMatchMode.STICKY;
-
-	/// <summary>
-	/// Dictionary of all discovered devices, indexed by Guid.
-	/// </summary>
-	protected ConcurrentDictionary<Guid, IDevice> DiscoveredDevicesRegistry { get; } = new();
-
-	/// <summary>
-	/// List of all discovered devices.
-	/// </summary>
-	public virtual IReadOnlyList<IDevice> DiscoveredDevices => DiscoveredDevicesRegistry.Values.ToList();
-
-	/// <summary>
-	/// Used to store all connected devices
-	/// </summary>
-	public ConcurrentDictionary<string, IDevice> ConnectedDeviceRegistry { get; } = new();
-
-	/// <summary>
-	/// List of all connected devices.
-	/// </summary>
-	public IReadOnlyList<IDevice> ConnectedDevices => ConnectedDeviceRegistry.Values.ToList();
-
-	/// <summary>
-	/// List of all bonded devices (or null if the device does not support this information).
-	/// </summary>
-	public IReadOnlyList<IDevice> BondedDevices => GetBondedDevices();
 
 	/// <summary>
 	/// Starts scanning for BLE devices that fulfill the <paramref name="deviceFilter"/>.
@@ -154,11 +108,8 @@ public abstract class AdapterBase : IAdapter
 	/// DeviceDiscovered will only be called, if <paramref name="deviceFilter"/> returns <c>true</c> for the discovered device.
 	/// This overload takes a list of service IDs and is only kept for backwards compatibility. Might be removed in a future version.
 	/// </summary>
-	public async Task StartScanningForDevicesAsync(Guid[] serviceUuids, Func<IDevice, bool> deviceFilter = null, bool allowDuplicatesKey = false,
-		CancellationToken cancellationToken = default)
-	{
-		await StartScanningForDevicesAsync(new ScanFilterOptions { ServiceUuids = serviceUuids }, deviceFilter, allowDuplicatesKey, cancellationToken);
-	}
+	public async Task StartScanningForDevicesAsync(Guid[] serviceUuids, Func<IDevice, bool> deviceFilter = null, bool allowDuplicatesKey = false, CancellationToken cancellationToken = default)
+		=> await StartScanningForDevicesAsync(new ScanFilterOptions { ServiceUuids = serviceUuids }, deviceFilter, allowDuplicatesKey, cancellationToken);
 
 	/// <summary>
 	/// Stops scanning for BLE devices.
@@ -172,6 +123,96 @@ public abstract class AdapterBase : IAdapter
 
 		return Task.FromResult(0);
 	}
+
+	/// <summary>
+	/// Dictionary of all discovered devices, indexed by Guid.
+	/// </summary>
+	protected ConcurrentDictionary<Guid, IDevice> DiscoveredDevicesRegistry { get; } = new();
+
+	/// <summary>
+	/// List of all discovered devices.
+	/// </summary>
+	public virtual IReadOnlyList<IDevice> DiscoveredDevices => DiscoveredDevicesRegistry.Values.ToList();
+
+	/// <summary>
+	/// Indicates whether extended advertising (BLE5) is supported.
+	/// </summary>
+	public virtual bool SupportsExtendedAdvertising() => false;
+
+	/// <summary>
+	/// Handle discovery of a new device.
+	/// </summary>
+	protected void HandleDiscoveredDevice(IDevice device)
+	{
+		if (_currentScanDeviceFilter != null && !_currentScanDeviceFilter(device))
+			return;
+
+		DeviceAdvertised?.Invoke(this, new() { Device = device });
+
+		// TODO (sms): check equality implementation of device
+		if (!DiscoveredDevicesRegistry.TryAdd(device.Id, device))
+			return;
+
+		DeviceDiscovered?.Invoke(this, new() { Device = device });
+	}
+
+	/// <summary>
+	/// Native implementation of StartScanningForDevicesAsync.
+	/// </summary>
+	protected abstract Task StartScanningForDevicesNativeAsync(ScanFilterOptions scanFilterOptions, bool allowDuplicatesKey, CancellationToken scanCancellationToken);
+
+	/// <summary>
+	/// Stopping the scan (native implementation).
+	/// </summary>
+	protected abstract void StopScanNative();
+
+	private void CleanupScan()
+	{
+		Trace.Message("Adapter: Stopping the scan for devices.");
+		StopScanNative();
+
+		if (_scanCancellationTokenSource != null)
+		{
+			_scanCancellationTokenSource.Dispose();
+			_scanCancellationTokenSource = null;
+		}
+
+		IsScanning = false;
+	}
+
+	#endregion Discovery
+
+	#region Connection
+
+	/// <summary>
+	/// Occurs when a device has been connected.
+	/// </summary>
+	public event EventHandler<DeviceEventArgs> DeviceConnected;
+
+	/// <summary>
+	/// Occurs when a device has been disconnected. This occurs on intended disconnects after <see cref="DisconnectDeviceAsync"/>.
+	/// </summary>
+	public event EventHandler<DeviceEventArgs> DeviceDisconnected;
+
+	/// <summary>
+	/// Occurs when a device has been disconnected. This occurs on unintended disconnects (e.g. when the device exploded).
+	/// </summary>
+	public event EventHandler<DeviceErrorEventArgs> DeviceConnectionLost;
+
+	/// <summary>
+	/// Occurs when the connection to a device fails.
+	/// </summary>
+	public event EventHandler<DeviceErrorEventArgs> DeviceConnectionError;
+
+	/// <summary>
+	/// Used to store all connected devices
+	/// </summary>
+	public ConcurrentDictionary<string, IDevice> ConnectedDeviceRegistry { get; } = new();
+
+	/// <summary>
+	/// List of all connected devices.
+	/// </summary>
+	public IReadOnlyList<IDevice> ConnectedDevices => ConnectedDeviceRegistry.Values.ToList();
 
 	/// <summary>
 	/// Connects to the <paramref name="device"/>.
@@ -190,12 +231,10 @@ public abstract class AdapterBase : IAdapter
 
 		using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
 		{
-			await TaskBuilder.FromEvent<bool, EventHandler<DeviceEventArgs>, EventHandler<DeviceErrorEventArgs>>(
-				execute: () =>
-				{
-					ConnectToDeviceNativeAsync(device, connectParameters, cts.Token);
-				},
-
+			await TaskBuilder.FromEvent<bool, EventHandler<DeviceEventArgs>, EventHandler<DeviceErrorEventArgs>>
+			(
+				execute: () => ConnectToDeviceNativeAsync(device, connectParameters, cts.Token),
+				// ReSharper disable once UnusedParameter.Local
 				getCompleteHandler: (complete, reject) => (_, args) =>
 				{
 					if (args.Device.Id == device.Id)
@@ -206,38 +245,37 @@ public abstract class AdapterBase : IAdapter
 				},
 				subscribeComplete: handler => DeviceConnected += handler,
 				unsubscribeComplete: handler => DeviceConnected -= handler,
-
 				getRejectHandler: reject => (_, args) =>
 				{
-					if (args.Device?.Id == device.Id)
+					if (args?.Device != null && args.Device.Id == device.Id)
 					{
-						Trace.Message($"{nameof(ConnectToDeviceAsync)} Error: {args.Device?.Id} {args.Device?.Name}");
-						reject(new DeviceConnectionException((Guid)args.Device?.Id, args.Device?.Name, args.ErrorMessage));
+						Trace.Message($"{nameof(ConnectToDeviceAsync)} Error: {args.Device.Id} {args.Device.Name}");
+						reject(new DeviceConnectionException(args.Device.Id, args.Device?.Name, args.ErrorMessage));
 					}
 				},
-
 				subscribeReject: handler => DeviceConnectionError += handler,
 				unsubscribeReject: handler => DeviceConnectionError -= handler,
-				token: cts.Token, mainthread: false);
+				token: cts.Token, mainthread: false
+			);
 		}
 	}
 
-		/// <summary>
-		/// Disconnects from the <paramref name="device"/>.
-		/// </summary>
-		/// <param name="device">Device to connect from.</param>
-		/// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is None.</param>
-		public Task DisconnectDeviceAsync(IDevice device, CancellationToken cancellationToken = default)
+	/// <summary>
+	/// Disconnects from the <paramref name="device"/>.
+	/// </summary>
+	/// <param name="device">Device to connect from.</param>
+	/// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is None.</param>
+	public Task DisconnectDeviceAsync(IDevice device, CancellationToken cancellationToken = default)
+	{
+		if (!ConnectedDevices.Contains(device))
 		{
-			if (!ConnectedDevices.Contains(device))
-			{
-				Trace.Message("Disconnect async: device {0} not in the list of connected devices.", device.Name);
-				return Task.FromResult(false);
-			}
+			Trace.Message($"{nameof(DisconnectDeviceAsync)}: device {device.Name} not in the list of connected devices.");
+			return Task.FromResult(false);
+		}
 
-		return TaskBuilder.FromEvent<bool, EventHandler<DeviceEventArgs>, EventHandler<DeviceErrorEventArgs>>(
+		return TaskBuilder.FromEvent<bool, EventHandler<DeviceEventArgs>, EventHandler<DeviceErrorEventArgs>>
+		(
 			execute: () => DisconnectDeviceNative(device),
-
 			getCompleteHandler: (complete, reject) => (_, args) =>
 			{
 				if (args.Device.Id == device.Id)
@@ -248,50 +286,18 @@ public abstract class AdapterBase : IAdapter
 			},
 			subscribeComplete: handler => DeviceDisconnected += handler,
 			unsubscribeComplete: handler => DeviceDisconnected -= handler,
-
-			   getRejectHandler: reject => ((sender, args) =>
-			   {
-				   if (args.Device.Id == device.Id)
-				   {
-					   Trace.Message("DisconnectAsync", "Disconnect Error: {0} {1}", args.Device?.Id, args.Device?.Name);
-					   reject(new Exception("Disconnect operation exception"));
-				   }
-			   }),
-			   subscribeReject: handler => DeviceConnectionError += handler,
-			   unsubscribeReject: handler => DeviceConnectionError -= handler,
-			   token: cancellationToken);
-		}
-
-	private void CleanupScan()
-	{
-		Trace.Message("Adapter: Stopping the scan for devices.");
-		StopScanNative();
-
-		if (_scanCancellationTokenSource != null)
-		{
-			_scanCancellationTokenSource.Dispose();
-			_scanCancellationTokenSource = null;
-		}
-
-		IsScanning = false;
-	}
-
-	/// <summary>
-	/// Handle discovery of a new device.
-	/// </summary>
-	public void HandleDiscoveredDevice(IDevice device)
-	{
-		if (_currentScanDeviceFilter != null && !_currentScanDeviceFilter(device))
-			return;
-
-		DeviceAdvertised?.Invoke(this, new() { Device = device });
-
-		// TODO (sms): check equality implementation of device
-		if (DiscoveredDevicesRegistry.ContainsKey(device.Id))
-			return;
-
-		DiscoveredDevicesRegistry[device.Id] = device;
-		DeviceDiscovered?.Invoke(this, new() { Device = device });
+			getRejectHandler: reject => (sender, args) =>
+			{
+				if (args.Device.Id == device.Id)
+				{
+					Trace.Message($"{nameof(DisconnectDeviceAsync)}, Disconnect Error: {args.Device?.Id} {args.Device?.Name}");
+					reject(new("Disconnect operation exception"));
+				}
+			},
+			subscribeReject: handler => DeviceConnectionError += handler,
+			unsubscribeReject: handler => DeviceConnectionError -= handler,
+			token: cancellationToken
+		);
 	}
 
 	/// <summary>
@@ -302,7 +308,7 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Handle disconnection of a device.
 	/// </summary>
-		public void HandleDisconnectedDevice(bool disconnectRequested, IDevice device, string message = "")
+	public void HandleDisconnectedDevice(bool disconnectRequested, IDevice device, string message = "")
 	{
 		if (disconnectRequested)
 		{
@@ -311,12 +317,12 @@ public abstract class AdapterBase : IAdapter
 		}
 		else
 		{
-				string m = !string.IsNullOrWhiteSpace(message) ? message : "DisconnectedPeripheral by lost signal";
-				Trace.Message($"{m}: {device.Name}");
-				DeviceConnectionLost?.Invoke(this, new DeviceErrorEventArgs { Device = device, ErrorMessage = m });
+			var m = !string.IsNullOrWhiteSpace(message) ? message : "DisconnectedPeripheral by lost signal";
+			Trace.Message($"{m}: {device.Name}");
+			DeviceConnectionLost?.Invoke(this, new() { Device = device, ErrorMessage = m });
 
-				if (DiscoveredDevicesRegistry.TryRemove(device.Id, out _))
-					Trace.Message("Removed device from discovered devices list: {0}", device.Name);
+			if (DiscoveredDevicesRegistry.TryRemove(device.Id, out _))
+				Trace.Message($"Removed device from discovered devices list: {device.Name}");
 		}
 	}
 
@@ -328,15 +334,6 @@ public abstract class AdapterBase : IAdapter
 		Trace.Message($"Failed to connect peripheral {device.Id}: {device.Name}");
 		DeviceConnectionError?.Invoke(this, new() { Device = device, ErrorMessage = errorMessage });
 	}
-
-	/// <inheritdoc/>
-	public abstract Task BondAsync(IDevice device);
-
-	/// <summary>
-	/// Handle bond state changed information.
-	/// </summary>
-	/// <param name="args"></param>
-	protected void OnDeviceBondStateChanged(DeviceBondStateChangedEventArgs args) => DeviceBondStateChanged?.Invoke(this, args);
 
 	/// <summary>
 	/// Connects to a device with a known GUID without scanning and if in range. Does not scan for devices.
@@ -357,17 +354,10 @@ public abstract class AdapterBase : IAdapter
 	}
 
 	/// <summary>
-	/// Native implementation of StartScanningForDevicesAsync.
-	/// </summary>
-	protected abstract Task StartScanningForDevicesNativeAsync(ScanFilterOptions scanFilterOptions, bool allowDuplicatesKey, CancellationToken scanCancellationToken);
-	/// <summary>
-	/// Stopping the scan (native implementation).
-	/// </summary>
-	protected abstract void StopScanNative();
-	/// <summary>
 	/// Native implementation of ConnectToDeviceAsync.
 	/// </summary>
 	protected abstract Task ConnectToDeviceNativeAsync(IDevice device, ConnectParameters connectParameters, CancellationToken cancellationToken);
+
 	/// <summary>
 	/// Native implementation of DisconnectDeviceAsync.
 	/// </summary>
@@ -376,27 +366,22 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Native implementation of ConnectToKnownDeviceAsync.
 	/// </summary>
-	public abstract Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
+	protected abstract Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
+
+	#endregion Connection
+
 	/// <summary>
 	/// Returns all BLE devices connected to the system.
 	/// </summary>
-	public abstract IReadOnlyList<IDevice> GetSystemConnectedOrPairedDevices(Guid[] services = null);
+	public abstract IReadOnlyList<IDevice> GetConnectedOrBondedDevices(Guid[] services = null);
+
 	/// <summary>
 	/// Returns a list of paired BLE devices for the given UUIDs.
 	/// </summary>
-	public abstract IReadOnlyList<IDevice> GetKnownDevicesByIds(Guid[] ids);
-	/// <summary>
-	/// Returns all BLE device bonded to the system.
-	/// </summary>
-	protected abstract IReadOnlyList<IDevice> GetBondedDevices();
-
-	/// <summary>
-	/// Indicates whether extended advertising (BLE5) is supported.
-	/// </summary>
-	public virtual bool SupportsExtendedAdvertising() => false;
+	public abstract IReadOnlyList<IDevice> GetConnectedOrBondedDevicesByIds(Guid[] ids);
 
 	/// <summary>
 	/// Indicates whether the Coded PHY feature (BLE5) is supported.
 	/// </summary>
-	public virtual bool SupportsCodedPHY() => false;
+	public virtual bool SupportsCodedPhy() => false;
 }

@@ -26,7 +26,6 @@ using (var ct = new ConsoleTracer())
 		{ConsoleKey.D7, new("Loop: Connect -> Read services -> Disconnect", pdDemos.Connect_Read_Services_Disconnect_Loop) },
 		{ConsoleKey.D8, new("Loop: Connect -> Read services -> Dispose", pdDemos.Connect_Read_Services_Dispose_Loop) },
 		{ConsoleKey.D9, new("Connect -> Loop: ConnectionLost -> Connect", pdDemos.Connect_ConnectionLost_Reconnect) },
-		{ConsoleKey.Q, new("Adapter.BondAsync", pdDemos.BondAsync) },
 		{ConsoleKey.W, new("Adapter.BondedDevices", pdDemos.GetBondedDevices) },
 		{ConsoleKey.S, new("Device.BondState", pdDemos.ShowBondState) },
 		{ConsoleKey.T, new("Pure Windows: Connect -> Disconnect", wdemos.Connect_Disconnect) },
