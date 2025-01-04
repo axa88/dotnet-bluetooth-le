@@ -13,7 +13,7 @@ using Java.Util;
 
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using Plugin.BLE.Abstractions.Contracts.Pairing;
+using Plugin.BLE.Abstractions.Contracts.Bonding;
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Android.Extensions;
 using Plugin.BLE.BroadcastReceivers;
@@ -25,7 +25,7 @@ using Trace = Plugin.BLE.Abstractions.Trace;
 
 namespace Plugin.BLE.Android;
 
-public class Adapter : AdapterBase, IBondReportable, IBondable
+public class Adapter : AdapterBase, IBondReport, IBondRequest
 {
 	private readonly BluetoothManager _bluetoothManager;
 	private readonly BluetoothAdapter _bluetoothAdapter;

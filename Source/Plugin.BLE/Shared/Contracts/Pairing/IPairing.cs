@@ -6,15 +6,15 @@ using System.Threading.Tasks;
 using Plugin.BLE.Abstractions.EventArgs;
 
 
-namespace Plugin.BLE.Abstractions.Contracts.Pairing;
+namespace Plugin.BLE.Abstractions.Contracts.Bonding;
 
-public interface IBondReportable
+/// <summary>
+/// Indicate an <see cref="IAdapter"/> is able to support bond reporting on a platform
+/// </summary>
+public interface IBondReport
 {
 	/// <summary>
 	/// Occurs when the bonding state of a device changed
-	/// Android: Supported
-	/// iOS: Not supported
-	/// Windows: Not supported
 	/// </summary>
 	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
 
@@ -24,16 +24,17 @@ public interface IBondReportable
 	public IReadOnlyList<IDevice> BondedDevices { get; }
 }
 
+
 /// <summary>
-/// Indicate an <see cref="IAdapter"/> is able to programmatically request device Bonding, and is compatible with Xplatform Bonding signatures and optional pairing parameters and results.
+/// Indicate an <see cref="IAdapter"/> is able to programmatically request device Bonding, and is compatible with Xplatform Bonding signatures with optional pairing parameters and results.
 /// </summary>
-public interface IBondable
+public interface IBondRequest
 {
 	/// <summary>
-	/// Use to create a Bond with Pairing options
+	/// Use to create a Bond with options on Pairing
 	/// </summary>
 	/// <param name="device"> Device to pair </param>
-	/// <param name="bondingOptions"> For use when the platform's <see cref="IAdapter"/> is capable of accepting pairing options </param>
+	/// <param name="bondingOptions"> For use when the platform's <see cref="IAdapter"/> able to accept pairing options </param>
 	/// <param name="cancellationToken"> To cancel the Bonding process </param>
 	/// <returns></returns>
 	public Task<BondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default);
@@ -41,7 +42,7 @@ public interface IBondable
 
 
 /// <summary>
-/// Indicate an <see cref="IAdapter"/> is compatible of handling a programmatic pairing response
+/// Indicate an <see cref="IAdapter"/> is able to programmatically process pairing requests
 /// </summary>
 public interface IPairProcess
 {
@@ -160,19 +161,19 @@ public enum PairModes
 	None = 0,
 
 	/// <summary>
-	/// The application must confirm that it wishes to perform the pairing action. An optional confirmation dialog can be presented to the UI.
+	/// It is intended that the application confirms that the user wishes to perform the pairing action. An optional confirmation dialog can be presented to the UI.
 	/// The application must respond via <see cref="IPairProcess.PairRespondedEventArgs.ApprovePairingResponse"/> with <see cref="IPairProcess.ConfirmPairResponse"/> if the pairing is to complete.
 	/// </summary>
 	Consent = 0b1,
 
 	/// <summary>
-	/// It is intended for the application to display the given PIN so the user can enter it on the other device.
+	/// It is intended that the application displays the given PIN so the user can enter it on the other device.
 	/// The application must respond via <see cref="IPairProcess.PairRespondedEventArgs.ApprovePairingResponse"/> with <see cref="IPairProcess.ConfirmPairResponse"/> if the pairing is to complete.
 	/// </summary>
 	DisplayPin = 0b10,
 
 	/// <summary>
-	/// It is intended that the application request, either a known or remotely displayed PIN from the user.
+	/// It is intended that the application requests from the user, either a known or remotely displayed PIN.
 	/// The application must respond via <see cref="IPairProcess.PairRespondedEventArgs.ApprovePairingResponse"/> passing the <see cref="IPairProcess.PinPairResponse.Pin"/> via <see cref="IPairProcess.PinPairResponse"/> if the pairing is to complete.
 	/// </summary>
 	ProvidePin = 0b100,
@@ -191,7 +192,7 @@ public enum PairModes
 
 	/// <summary>
 	/// Represents any of the available pairing methods.
-	/// Intended for use when the application is prepared to accept any negotiated pairing mode
+	/// Intended for use when the application is prepared to process any negotiated pairing mode
 	/// </summary>
 	Any = ProvidePasswordCredential | ConfirmPinMatch | ProvidePin | DisplayPin | Consent
 }

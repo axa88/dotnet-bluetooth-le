@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using Plugin.BLE.Abstractions.Contracts.Pairing;
+using Plugin.BLE.Abstractions.Contracts.Bonding;
 using Plugin.BLE.Extensions;
 
 using Windows.Devices.Bluetooth;
@@ -20,7 +20,7 @@ using Plugin.BLE.Abstractions.EventArgs;
 
 namespace Plugin.BLE.Windows;
 
-public class Adapter(BluetoothAdapter adapter) : AdapterBase, IBondReportable, IBondable, IPairProcess
+public class Adapter(BluetoothAdapter adapter) : AdapterBase, IBondReport, IBondRequest, IPairProcess
 {
 	private BluetoothLEAdvertisementWatcher _bleWatcher;
 
@@ -277,13 +277,12 @@ public class Adapter(BluetoothAdapter adapter) : AdapterBase, IBondReportable, I
 
 			cancellationToken.ThrowIfCancellationRequested(); // check for cancel after allowing it to use the awaited to exit gracefully, but before subsequent awaited code
 
-			deviceInformation.Pairing.Custom.PairingRequested += OnPairingRequested;
-
 			DevicePairingResult result;
 			if (options == null)
-				result = await deviceInformation.Pairing.PairAsync().AsTask(cancellationToken); // support legacy versions of this API (just works?)
+				result = await deviceInformation.Pairing.PairAsync().AsTask(cancellationToken);
 			else
 			{
+				deviceInformation.Pairing.Custom.PairingRequested += OnPairingRequested;
 				var requestedModes = (DevicePairingKinds)options.RequestedModes;
 				var requestedProtection = (DevicePairingProtectionLevel)options.MinimumRequestedProtection;
 				result = await deviceInformation.Pairing.Custom.PairAsync(requestedModes, requestedProtection).AsTask(cancellationToken);

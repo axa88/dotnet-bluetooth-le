@@ -2,7 +2,7 @@
 
 using Android.Bluetooth;
 using Plugin.BLE.Abstractions;
-using Plugin.BLE.Abstractions.Contracts.Pairing;
+using Plugin.BLE.Abstractions.Contracts.Bonding;
 
 
 namespace Plugin.BLE.Extensions;
