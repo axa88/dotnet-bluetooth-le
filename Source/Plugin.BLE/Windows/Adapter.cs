@@ -20,15 +20,40 @@ using Plugin.BLE.Abstractions.EventArgs;
 
 namespace Plugin.BLE.Windows;
 
-public class Adapter(BluetoothAdapter adapter) : AdapterBase, IBondReport, IBondRequest, IPairProcess
+public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 {
 	private BluetoothLEAdvertisementWatcher _bleWatcher;
+	private readonly BluetoothAdapter _adapter;
 
 	/// <summary>
 	/// Registry used to store device instances for pending disconnect operations
 	/// Helps to detect connection lost events.
 	/// </summary>
 	private readonly IDictionary<string, IDevice> _disconnectingRegistry = new ConcurrentDictionary<string, IDevice>();
+
+	private readonly DeviceWatcher _pairedDeviceWatcher;
+
+	public Adapter(BluetoothAdapter adapter)
+	{
+		_adapter = adapter;
+
+		ConcurrentDictionary<string, Device> bondedDevices = new();
+		_pairedDeviceWatcher = DeviceInformation.CreateWatcher(BluetoothLEDevice.GetDeviceSelectorFromPairingState(true));
+
+		_pairedDeviceWatcher.Added += (_, args) =>
+		{
+			if ((Device)GetBondedDevices().First(dev => dev.Id == args.Id.ToBleDeviceGuidFromId()) is { } device)
+				DeviceBondStateChanged?.Invoke(this, new() { Device = bondedDevices[args.Id] = device, Address = args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), State = DeviceBondState.Bonded });
+		};
+
+		_pairedDeviceWatcher.Removed += (_, args) =>
+		{
+			if (bondedDevices.TryRemove(args.Id, out Device device))
+				DeviceBondStateChanged?.Invoke(this, new() { Device = bondedDevices[args.Id] = device, Address = args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), State = DeviceBondState.NotBonded });
+		};
+
+		_pairedDeviceWatcher.Start();
+	}
 
 	protected override Task StartScanningForDevicesNativeAsync(ScanFilterOptions scanFilterOptions, bool allowDuplicatesKey, CancellationToken scanCancellationToken)
 	{
@@ -216,7 +241,7 @@ public class Adapter(BluetoothAdapter adapter) : AdapterBase, IBondReport, IBond
 	public override IReadOnlyList<IDevice> GetConnectedOrBondedDevicesByIds(Guid[] ids) => []; // TODO: implement this
 
 	#pragma warning disable CA1416
-	public override bool SupportsExtendedAdvertising() => adapter.IsExtendedAdvertisingSupported;
+	public override bool SupportsExtendedAdvertising() => _adapter.IsExtendedAdvertisingSupported;
 	#pragma warning restore CA1416
 
 	#region Implementation of IBondReportable
