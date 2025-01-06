@@ -12,7 +12,7 @@ using Windows.Devices.Enumeration;
 using Plugin.BLE;
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using Plugin.BLE.Abstractions.Contracts.Pairing;
+using Plugin.BLE.Abstractions.Contracts.Bonding;
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Utils;
 using Plugin.BLE.Extensions;
@@ -109,7 +109,7 @@ namespace BLE.Client.WinConsole
 			Write($"{nameof(_selectedDevice.BondState)}: {_selectedDevice.BondState}");
 			Write($"{nameof(_selectedDevice.Rssi)}: {_selectedDevice.Rssi}");
 			Write($"{nameof(_selectedDevice.AdvertisementRecords)}: {_selectedDevice.AdvertisementRecords.Count}");
-			if (_adapter is IBondReportable bondReportable)
+			if (_adapter is IBondReport bondReportable)
 				Write($"Bonded: {(bondReportable.BondedDevices.Contains(_selectedDevice))}");
 			else
 				Write($"No Bond info");
@@ -396,7 +396,7 @@ namespace BLE.Client.WinConsole
 			}
 
 			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-			if (_adapter is IBondable bondable)
+			if (_adapter is IBondRequest bondable)
 			{
 				var pairProcess = _adapter as IPairProcess;
 				if (pairProcess != null)
@@ -457,7 +457,7 @@ namespace BLE.Client.WinConsole
 
 		public Task GetBondedDevices()
 		{
-			if (_adapter is IBondReportable bondReportable)
+			if (_adapter is IBondReport bondReportable)
 			{
 				var i = 0;
 				foreach (var dev in bondReportable.BondedDevices)

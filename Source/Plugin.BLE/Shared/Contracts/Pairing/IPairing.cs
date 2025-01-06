@@ -117,9 +117,9 @@ public class BondingOptions(PairModes requestedModes = PairModes.None, Protectio
 /// In addition to success, Windows and Android to a lesser extent may report information on failure </param>
 /// <param name="detail"> String representation of the <see cref="BondResult.Status" /> </param>
 /// <param name="protectionUsed"> The negotiated protection level (Authentication and or Encryption) used for communication with the remote device </param>
-public class BondResult(DeviceBondStatus status, string detail = "", ProtectionLevel protectionUsed = ProtectionLevel.Unused)
+public class BondResult(BondStatus status, string detail = "", ProtectionLevel protectionUsed = ProtectionLevel.Unused)
 {
-	public DeviceBondStatus Status { get; } = status;
+	public BondStatus Status { get; } = status;
 	public string Detail { get; } = detail;
 	public ProtectionLevel ProtectionUsed { get; } = protectionUsed;
 }
@@ -128,7 +128,7 @@ public class BondResult(DeviceBondStatus status, string detail = "", ProtectionL
 /// <summary>
 /// For brevity, consolidates various unclear results of the Bonding process into a select few categories
 /// </summary>
-public enum DeviceBondStatus
+public enum BondStatus
 {
 	/// <summary>
 	/// Result is simply that the device is known to be paired upon task completion. There may or may not be more information in <see cref="BondResult.Detail"/>

@@ -338,7 +338,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 		// prevent an additional attempt as here is the only place to know why it failed
 		if (nativeDevice.BondState is Bond.Bonded or Bond.Bonding)
 		{
-			DeviceBondStatus status = nativeDevice.BondState.XPlatformBondStatus();
+			BondStatus status = nativeDevice.BondState.XPlatformBondStatus();
 			bondTaskSource.SetResult(new(status, status.ToString()));
 			return bondTaskSource.Task;
 		}
@@ -347,14 +347,14 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 		// A pending bond request exists and should be allowed to finish, not randomly canceled by any and every subsequent call
 		if (!_bondingTaskSources.TryAdd(deviceAddress, bondTaskSource))
 		{
-			bondTaskSource.TrySetResult(new(DeviceBondStatus.SpecifiedFailure, "OperationAlreadyInProgress"));
+			bondTaskSource.TrySetResult(new(BondStatus.SpecifiedFailure, "OperationAlreadyInProgress"));
 			return bondTaskSource.Task;
 		}
 
 		if (!nativeDevice.CreateBond())
 		{
 			_bondingTaskSources.Remove(deviceAddress);
-			bondTaskSource.TrySetResult(new(DeviceBondStatus.UnspecifiedFailure));
+			bondTaskSource.TrySetResult(new(BondStatus.UnspecifiedFailure));
 		}
 
 		return bondTaskSource.Task;

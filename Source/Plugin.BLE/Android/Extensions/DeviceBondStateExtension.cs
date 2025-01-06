@@ -24,13 +24,13 @@ internal static class DeviceBondStateExtension
 		}
 	}
 
-	internal static DeviceBondStatus XPlatformBondStatus(this Bond pairStatus)
+	internal static BondStatus XPlatformBondStatus(this Bond pairStatus)
 	{
 		return pairStatus switch
 		{
-			Bond.Bonded => DeviceBondStatus.Paired,
-			Bond.Bonding => DeviceBondStatus.SpecifiedFailure,
-			Bond.None => DeviceBondStatus.UnspecifiedFailure,
+			Bond.Bonded => BondStatus.Paired,
+			Bond.Bonding => BondStatus.SpecifiedFailure,
+			Bond.None => BondStatus.UnspecifiedFailure,
 			_ => throw new ArgumentOutOfRangeException(nameof(pairStatus), pairStatus, null)
 		};
 	}

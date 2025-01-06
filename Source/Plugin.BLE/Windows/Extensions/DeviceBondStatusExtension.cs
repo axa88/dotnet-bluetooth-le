@@ -9,16 +9,16 @@ namespace Plugin.BLE.Extensions;
 
 internal static class DeviceBondStatusExtension
 {
-	public static DeviceBondStatus XPlatformPairStatus(this DevicePairingResultStatus pairStatus)
+	public static BondStatus XPlatformPairStatus(this DevicePairingResultStatus pairStatus)
 	{
 		switch (pairStatus)
 		{
 			case DevicePairingResultStatus.Paired:
-				return DeviceBondStatus.Paired;
+				return BondStatus.Paired;
 
 			case DevicePairingResultStatus.NotPaired:
 			case DevicePairingResultStatus.Failed:
-				return DeviceBondStatus.UnspecifiedFailure;
+				return BondStatus.UnspecifiedFailure;
 
 			case DevicePairingResultStatus.NotReadyToPair:
 			case DevicePairingResultStatus.AlreadyPaired:
@@ -37,7 +37,7 @@ internal static class DeviceBondStatusExtension
 			case DevicePairingResultStatus.RequiredHandlerNotRegistered:
 			case DevicePairingResultStatus.RejectedByHandler:
 			case DevicePairingResultStatus.RemoteDeviceHasAssociation:
-				return DeviceBondStatus.SpecifiedFailure;
+				return BondStatus.SpecifiedFailure;
 
 			default: throw new ArgumentOutOfRangeException(nameof(pairStatus), pairStatus, null);
 		}
