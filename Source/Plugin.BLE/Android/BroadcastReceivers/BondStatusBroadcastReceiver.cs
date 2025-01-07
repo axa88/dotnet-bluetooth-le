@@ -21,7 +21,7 @@ public class BondStatusBroadcastReceiver(Adapter adapter) : BroadcastReceiver
 		var extraBondState = (Bond)intent.GetIntExtra(BluetoothDevice.ExtraBondState, (int)Bond.None);
 
 		BluetoothDevice bluetoothDevice;
-		
+
 		#if NET6_0_OR_GREATER
 		if (OperatingSystem.IsAndroidVersionAtLeast(33))
 		#else
@@ -38,6 +38,6 @@ public class BondStatusBroadcastReceiver(Adapter adapter) : BroadcastReceiver
 		var device = new Device(adapter, bluetoothDevice, null);
 		var address = bluetoothDevice?.Address ?? string.Empty;
 		var bondState = extraBondState.XPlatformBondState();
-		BondStateChanged(this, new() { Address = address, Device = device, State = bondState });
+		BondStateChanged(this, new(device, address, bondState));
 	}
 }

@@ -43,13 +43,16 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 		_pairedDeviceWatcher.Added += (_, args) =>
 		{
 			if ((Device)GetBondedDevices().First(dev => dev.Id == args.Id.ToBleDeviceGuidFromId()) is { } device)
-				DeviceBondStateChanged?.Invoke(this, new() { Device = bondedDevices[args.Id] = device, Address = args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), State = DeviceBondState.Bonded });
+			{
+				bondedDevices[args.Id] = device;
+				DeviceBondStateChanged?.Invoke(this, new(device, args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), DeviceBondState.Bonded));
+			}
 		};
 
 		_pairedDeviceWatcher.Removed += (_, args) =>
 		{
 			if (bondedDevices.TryRemove(args.Id, out Device device))
-				DeviceBondStateChanged?.Invoke(this, new() { Device = bondedDevices[args.Id] = device, Address = args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), State = DeviceBondState.NotBonded });
+				DeviceBondStateChanged?.Invoke(this, new(bondedDevices[args.Id] = device, args.Id.ToBleDeviceGuidFromId().ToBleAddress().ToHexBleAddress(), DeviceBondState.NotBonded));
 		};
 
 		_pairedDeviceWatcher.Start();

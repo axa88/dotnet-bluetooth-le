@@ -147,13 +147,13 @@ public abstract class AdapterBase : IAdapter
 		if (_currentScanDeviceFilter != null && !_currentScanDeviceFilter(device))
 			return;
 
-		DeviceAdvertised?.Invoke(this, new() { Device = device });
+		DeviceAdvertised?.Invoke(this, new(device));
 
 		// TODO (sms): check equality implementation of device
 		if (!DiscoveredDevicesRegistry.TryAdd(device.Id, device))
 			return;
 
-		DeviceDiscovered?.Invoke(this, new() { Device = device });
+		DeviceDiscovered?.Invoke(this, new(device));
 	}
 
 	/// <summary>
@@ -303,7 +303,7 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Handle connection of a new device.
 	/// </summary>
-	public void HandleConnectedDevice(IDevice device) => DeviceConnected?.Invoke(this, new() { Device = device });
+	public void HandleConnectedDevice(IDevice device) => DeviceConnected?.Invoke(this, new(device));
 
 	/// <summary>
 	/// Handle disconnection of a device.
@@ -313,13 +313,13 @@ public abstract class AdapterBase : IAdapter
 		if (disconnectRequested)
 		{
 			Trace.Message($"DisconnectedPeripheral by user: {device.Name}");
-			DeviceDisconnected?.Invoke(this, new() { Device = device });
+			DeviceDisconnected?.Invoke(this, new(device));
 		}
 		else
 		{
 			var m = !string.IsNullOrWhiteSpace(message) ? message : "DisconnectedPeripheral by lost signal";
 			Trace.Message($"{m}: {device.Name}");
-			DeviceConnectionLost?.Invoke(this, new() { Device = device, ErrorMessage = m });
+			DeviceConnectionLost?.Invoke(this, new(device, m));
 
 			if (DiscoveredDevicesRegistry.TryRemove(device.Id, out _))
 				Trace.Message($"Removed device from discovered devices list: {device.Name}");
@@ -332,7 +332,7 @@ public abstract class AdapterBase : IAdapter
 	public void HandleConnectionFail(IDevice device, string errorMessage)
 	{
 		Trace.Message($"Failed to connect peripheral {device.Id}: {device.Name}");
-		DeviceConnectionError?.Invoke(this, new() { Device = device, ErrorMessage = errorMessage });
+		DeviceConnectionError?.Invoke(this, new(device, errorMessage));
 	}
 
 	/// <summary>
