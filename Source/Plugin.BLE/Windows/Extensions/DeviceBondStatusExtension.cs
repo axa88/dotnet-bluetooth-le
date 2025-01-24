@@ -1,8 +1,8 @@
 ﻿using System;
 
-using Windows.Devices.Enumeration;
+using Plugin.BLE.Shared.Contracts.Pairing;
 
-using Plugin.BLE.Abstractions.Contracts.Bonding;
+using Windows.Devices.Enumeration;
 
 
 namespace Plugin.BLE.Extensions;

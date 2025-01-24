@@ -13,11 +13,12 @@ using Java.Util;
 
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using Plugin.BLE.Abstractions.Contracts.Bonding;
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Android.Extensions;
 using Plugin.BLE.BroadcastReceivers;
 using Plugin.BLE.Extensions;
+using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Rssi;
 
 using Object = Java.Lang.Object;
 using Trace = Plugin.BLE.Abstractions.Trace;
@@ -32,7 +33,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 	private readonly Api18BleScanCallback _api18ScanCallback;
 	private readonly Api21BleScanCallback _api21ScanCallback;
 
-	private readonly Dictionary<string, TaskCompletionSource<BondResult>> _bondingTaskSources = [];
+	private readonly Dictionary<string, TaskCompletionSource<IBondResult>> _bondingTaskSources = [];
 
 	public Adapter(BluetoothManager bluetoothManager)
 	{
@@ -65,8 +66,8 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 				if (args.State != DeviceBondState.Bonding)
 				{
 					_bondingTaskSources.Remove(address);
-					BondResult bondResult = new(((BluetoothDevice)args.Device.NativeDevice).BondState.XPlatformBondStatus());
-					tcsResult.TrySetResult(bondResult);
+					BondResult bondResultManualPair = new(((BluetoothDevice)args.Device.NativeDevice).BondState.XPlatformBondStatus());
+					tcsResult.TrySetResult(bondResultManualPair);
 				}
 			}
 		};
@@ -249,7 +250,6 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 
 	protected override void DisconnectDeviceNative(IDevice device) => ((Device)device).Disconnect(); //make sure everything is disconnected
 
-	// ReSharper disable OptionalParameterHierarchyMismatch
 	protected override async Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters, CancellationToken cancellationToken)
 	// ReSharper restore OptionalParameterHierarchyMismatch
 	{
@@ -320,7 +320,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 
 	#region Implementation of IBondable
 
-	public Task<BondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default)
+	public Task<IBondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default)
 	{
 		// ToDo: should these return a failed result instead?
 		if (device == null)
@@ -333,13 +333,13 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 			throw new ArgumentException($"{device.NativeDevice} device with no address");
 
 		var deviceAddress = nativeDevice.Address;
-		var bondTaskSource = new TaskCompletionSource<BondResult>();
+		var bondTaskSource = new TaskCompletionSource<IBondResult>();
 
 		// prevent an additional attempt as here is the only place to know why it failed
 		if (nativeDevice.BondState is Bond.Bonded or Bond.Bonding)
 		{
-			BondStatus status = nativeDevice.BondState.XPlatformBondStatus();
-			bondTaskSource.SetResult(new(status, status.ToString()));
+			var status = nativeDevice.BondState.XPlatformBondStatus();
+			bondTaskSource.SetResult(new BondResult(status, status.ToString()));
 			return bondTaskSource.Task;
 		}
 
@@ -347,14 +347,14 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 		// A pending bond request exists and should be allowed to finish, not randomly canceled by any and every subsequent call
 		if (!_bondingTaskSources.TryAdd(deviceAddress, bondTaskSource))
 		{
-			bondTaskSource.TrySetResult(new(BondStatus.SpecifiedFailure, "OperationAlreadyInProgress"));
+			bondTaskSource.TrySetResult(new BondResult(BondStatus.SpecifiedFailure, "OperationAlreadyInProgress"));
 			return bondTaskSource.Task;
 		}
 
 		if (!nativeDevice.CreateBond())
 		{
 			_bondingTaskSources.Remove(deviceAddress);
-			bondTaskSource.TrySetResult(new(BondStatus.UnspecifiedFailure));
+			bondTaskSource.TrySetResult(new BondResult(BondStatus.UnspecifiedFailure));
 		}
 
 		return bondTaskSource.Task;
@@ -367,7 +367,9 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 		public void OnLeScan(BluetoothDevice bleDevice, int rssi, byte[] scanRecord)
 		{
 			Trace.Message("Adapter.LeScanCallback: " + bleDevice?.Name);
-			adapter.HandleDiscoveredDevice(new Device(adapter, bleDevice, null, rssi, scanRecord)); // No IsConnectable!
+			var device = new Device(adapter, bleDevice, null, scanRecord);
+			device.Rssi = new RssiBase() { Timestamp = DateTime.Now, Value = rssi is < 0 and >= sbyte.MinValue ? (sbyte)rssi : default };
+			adapter.HandleDiscoveredDevice(device); // No IsConnectable!
 		}
 	}
 
@@ -416,16 +418,12 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 				records.Add(new AdvertisementRecord(AdvertisementRecordType.ServiceData, result.ScanRecord.ServiceData));
 			}*/
 
-			var device = new Device(adapter, result.Device, null, result.Rssi, result.ScanRecord?.GetBytes(),
-				// ReSharper disable SimplifyConditionalTernaryExpression
-				#if NET6_0_OR_GREATER
-				OperatingSystem.IsAndroidVersionAtLeast(26)
-				#else
-				(Build.VERSION.SdkInt >= BuildVersionCodes.O)
-				#endif
-					? result.IsConnectable : true
-				// ReSharper restore SimplifyConditionalTernaryExpression
-			);
+			#if NET6_0_OR_GREATER
+			var device = new Device(adapter, result.Device, null, result.ScanRecord?.GetBytes(), !OperatingSystem.IsAndroidVersionAtLeast(26) || result.IsConnectable);
+			#else
+			var device = new Device(adapter, result.Device, null, result.ScanRecord?.GetBytes(), Build.VERSION.SdkInt < BuildVersionCodes.O || result.IsConnectable);
+			#endif
+			device.Rssi = new RssiBase() { Timestamp = DateTime.Now, Value = result.Rssi is < 0 and >= sbyte.MinValue ? (sbyte)result.Rssi : default };
 
 			//Device device;
 			//if (result.ScanRecord.ManufacturerSpecificData.Size() > 0)

@@ -5,103 +5,140 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Plugin.BLE.Abstractions.Contracts;
+using Plugin.BLE.Shared.Contracts.Rssi;
+using Plugin.BLE.Shared.Utils;
+
 
 namespace Plugin.BLE.Abstractions;
 
-/// <summary>
-/// Base class for anything that needs a cancellation token source.
-/// </summary>
-public interface ICancellationMaster
-{
-	/// <summary>
-	/// The cancellation token source.
-	/// </summary>
-	CancellationTokenSource TokenSource { get; set; }
-}
-
-/// <summary>
-/// Extensions for <c>ICancellationMaster</c>.
-/// </summary>
-public static class CancellationMasterExtensions
-{
-	/// <summary>
-	/// Obtain a combined token source of the <c>ICancellationMaster</c> with any other taken.
-	/// </summary>
-	public static CancellationTokenSource GetCombinedSource(this ICancellationMaster cancellationMaster, CancellationToken token) => CancellationTokenSource.CreateLinkedTokenSource(cancellationMaster.TokenSource.Token, token);
-
-	/// <summary>
-	/// Cancel any task connected to the token and dispose the source.
-	/// </summary>
-	public static void CancelEverything(this ICancellationMaster cancellationMaster)
-	{
-		cancellationMaster.TokenSource?.Cancel();
-		cancellationMaster.TokenSource?.Dispose();
-		cancellationMaster.TokenSource = null;
-	}
-
-	/// <summary>
-	/// Cancel any task connected to the token and create a new source.
-	/// </summary>
-	public static void CancelEverythingAndReInitialize(this ICancellationMaster cancellationMaster)
-	{
-		cancellationMaster.CancelEverything();
-		cancellationMaster.TokenSource = new();
-	}
-}
-
-/// <summary>
-/// Base class for platform-specific <c>Device</c> classes.
-/// </summary>
 public abstract class DeviceBase<TNativeDevice> : IDevice, ICancellationMaster
 {
-	/// <summary>
-	/// The adapter that connects to this device.
-	/// </summary>
 	private readonly IAdapter _adapter;
 	private readonly List<IService> _knownServices = [];
 
-	/// <summary>
-	/// Id of the device.
-	/// </summary>
-	public Guid Id { get; protected set; }
-
-	/// <summary>
-	/// Advertised Name of the Device.
-	/// </summary>
-	public string Name { get; protected set; }
-
-	/// <summary>
-	/// Last known rssi value in decibels.
-	/// Can be updated via <see cref="UpdateRssiAsync(CancellationToken)"/>.
-	/// </summary>
-	public int Rssi { get; protected set; }
-
-	/// <summary>
-	/// State of the device.
-	/// </summary>
-	public DeviceState State => GetState();
-
-	/// <summary>
-	/// All the advertisement records.
-	/// </summary>
-	public IReadOnlyList<AdvertisementRecord> AdvertisementRecords { get; protected set; }
-
-	/// <summary>
-	/// The native device.
-	/// </summary>
-	public TNativeDevice NativeDevice { get; protected set; }
-
-	CancellationTokenSource ICancellationMaster.TokenSource { get; set; } = new();
-	object IDevice.NativeDevice => NativeDevice;
-
-	/// <summary>
-	/// DeviceBase constructor.
-	/// </summary>
 	protected DeviceBase(IAdapter adapter, TNativeDevice nativeDevice)
 	{
 		_adapter = adapter;
 		NativeDevice = nativeDevice;
 	}
+
+	protected DeviceBase(IAdapter adapter, bool isConnectable)
+	{
+		_adapter = adapter;
+		IsConnectable = isConnectable;
+	}
+
+	CancellationTokenSource ICancellationMaster.TokenSource { get; set; } = new();
+
+	#region Basic
+
+	/// <summary>
+	/// ID of the device.
+	/// </summary>
+	public Guid Id { get; protected set; }
+
+	/// <summary>
+	/// Name of the Device acquired from advertisement or connection
+	/// </summary>
+	public virtual string Name { get; protected internal set; }
+
+	#endregion Basic
+
+	#region Advertisments
+
+	/// <summary>
+	/// All the advertisement records.
+	/// </summary>
+	public IReadOnlyList<AdvertisementRecord> AdvertisementRecords { get; protected internal set; }
+
+	#endregion Advertisments
+
+	#region Rssi
+
+	/// <summary>
+	/// Last acquired <see cref="IRssi"/> value in decibels.
+	/// </summary>
+	protected internal IRssi Rssi { get; set; }
+
+	public abstract Task<IRssi> GetRssi(CancellationToken cancellationToken = default);
+
+	/*/// <summary>
+	/// Updates the rssi value.
+	/// </summary>
+	public abstract Task<bool> UpdateRssiAsync(CancellationToken cancellationToken = default);*/
+
+	#endregion Rssi
+
+	#region Connection
+
+	/// <summary>
+	/// State of the device.
+	/// </summary>
+	public abstract DeviceState State { get; }
+
+	/*/// <summary>
+	/// Gets the <see cref="DeviceBondState"/> of the device.
+	/// </summary>
+	public abstract DeviceBondState BondState { get; }*/
+
+	/*/// <summary>
+	/// Gets the <see cref="DeviceBondState"/> of the device.
+	/// </summary>
+	protected abstract DeviceBondState GetBondState();*/
+
+	/// <summary>
+	/// Shows whether the device supports the <see cref="IsConnectable"/>.
+	/// </summary>
+	public virtual bool SupportsIsConnectable => true;
+
+	/// <summary>
+	/// Reflects if the device is connectable.
+	/// Only supported if <see cref="SupportsIsConnectable"/> is true.
+	/// </summary>
+	public virtual bool IsConnectable { get; }
+
+	///// <summary>
+	///// Determines the state of the device.
+	///// </summary>
+	//protected abstract DeviceState GetState();
+
+	/// <summary>
+	/// Updates the connection parameters if already connected
+	/// </summary>
+	/// <param name="connectParameters"></param>
+	/// <returns></returns>
+	public abstract bool UpdateConnectionParameters(ConnectParameters connectParameters = default);
+
+	/// <summary>
+	/// Requests a bluetooth-le connection update request.
+	/// </summary>
+	public bool UpdateConnectionInterval(ConnectionInterval interval) => UpdateConnectionIntervalNative(interval);
+
+	/// <summary>
+	/// Native implementation of <c>UpdateConnectionInterval</c>.
+	/// </summary>
+	protected abstract bool UpdateConnectionIntervalNative(ConnectionInterval interval);
+
+	#endregion Connection
+
+	#region Mtu
+
+	/// <summary>
+	/// Requests a MTU update and fires an "Exchange MTU Request" on the ble stack.
+	/// </summary>
+	public async Task<int> RequestMtuAsync(int requestValue, CancellationToken cancellationToken = default)
+	{
+		return await RequestMtuNativeAsync(requestValue, cancellationToken);
+	}
+
+	/// <summary>
+	/// Native implementation of <c>RequestMtuAsync</c>.
+	/// </summary>
+	protected abstract Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken);
+
+	#endregion Mtu
+
+	#region Services
 
 	/// <summary>
 	/// Gets all services of the device.
@@ -139,28 +176,6 @@ public abstract class DeviceBase<TNativeDevice> : IDevice, ICancellationMaster
 		return services.ToList().FirstOrDefault(x => x.Id == id);
 	}
 
-	/// <summary>
-	/// Requests a MTU update and fires an "Exchange MTU Request" on the ble stack.
-	/// </summary>
-	public async Task<int> RequestMtuAsync(int requestValue, CancellationToken cancellationToken = default)
-	{
-		return await RequestMtuNativeAsync(requestValue, cancellationToken);
-	}
-
-	/// <summary>
-	/// Requests a bluetooth-le connection update request.
-	/// </summary>
-	public bool UpdateConnectionInterval(ConnectionInterval interval) => UpdateConnectionIntervalNative(interval);
-
-	/// <summary>
-	/// Updates the rssi value.
-	/// </summary>
-	public abstract Task<bool> UpdateRssiAsync(CancellationToken cancellationToken = default);
-
-	/// <summary>
-	/// Determines the state of the device.
-	/// </summary>
-	protected abstract DeviceState GetState();
 
 	/// <summary>
 	/// Native implementation of <c>GetServicesAsync</c>.
@@ -171,26 +186,6 @@ public abstract class DeviceBase<TNativeDevice> : IDevice, ICancellationMaster
 	/// Currently not being used anywhere!
 	/// </summary>
 	protected abstract Task<IService> GetServiceNativeAsync(Guid id, CancellationToken cancellationToken);
-
-	/// <summary>
-	/// Native implementation of <c>RequestMtuAsync</c>.
-	/// </summary>
-	protected abstract Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken);
-
-	/// <summary>
-	/// Native implementation of <c>UpdateConnectionInterval</c>.
-	/// </summary>
-	protected abstract bool UpdateConnectionIntervalNative(ConnectionInterval interval);
-
-	/// <summary>
-	/// Convert to string (using the advertised device name).
-	/// </summary>
-	public override string ToString() => Name;
-
-	/// <summary>
-	/// Dispose the device.
-	/// </summary>
-	public virtual void Dispose() => _adapter.DisconnectDeviceAsync(this);
 
 	/// <summary>
 	/// Clear all (known) services.
@@ -217,6 +212,26 @@ public abstract class DeviceBase<TNativeDevice> : IDevice, ICancellationMaster
 		}
 	}
 
+	#endregion Services
+
+	#region Eliminate
+
+	object IDevice.NativeDevice => NativeDevice;
+
+	/// <summary>
+	/// The native device.
+	/// </summary>
+	public TNativeDevice NativeDevice { get; protected set; }
+
+	#endregion Eliminate
+
+	#region Overrides
+
+	/// <summary>
+	/// Convert to string (using the advertised device name).
+	/// </summary>
+	public override string ToString() => Name;
+
 	/// <summary>
 	/// Equality operator for comparison with other devices.
 	/// Checks for equality of the <c>Id</c>.
@@ -239,31 +254,10 @@ public abstract class DeviceBase<TNativeDevice> : IDevice, ICancellationMaster
 	/// </summary>
 	public override int GetHashCode() => Id.GetHashCode();
 
-	/// <summary>
-	/// Reflects if the device is connectable.
-	/// Only supported if <see cref="SupportsIsConnectable"/> is true.
-	/// </summary>
-	public abstract bool IsConnectable { get; protected set; }
+	#endregion Overrides
 
 	/// <summary>
-	/// Shows whether the device supports the <see cref="IsConnectable"/>.
+	/// Dispose the device.
 	/// </summary>
-	public abstract bool SupportsIsConnectable { get; }
-
-	/// <summary>
-	/// Gets the <see cref="DeviceBondState"/> of the device.
-	/// </summary>
-	protected abstract DeviceBondState GetBondState();
-
-	/// <summary>
-	/// Updates the connection parameters if already connected
-	/// </summary>
-	/// <param name="connectParameters"></param>
-	/// <returns></returns>
-	public abstract bool UpdateConnectionParameters(ConnectParameters connectParameters = default);
-
-	/// <summary>
-	/// Gets the <see cref="DeviceBondState"/> of the device.
-	/// </summary>
-	public DeviceBondState BondState => GetBondState();
+	public virtual void Dispose() => _adapter.DisconnectDeviceAsync(this);
 }

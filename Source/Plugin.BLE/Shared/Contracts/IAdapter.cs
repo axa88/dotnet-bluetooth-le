@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Exceptions;
 
 
-// ReSharper disable once CheckNamespace
 namespace Plugin.BLE.Abstractions.Contracts;
 
 /// <summary>
@@ -139,7 +139,7 @@ public interface IAdapter
 	/// <param name="device">Device to connect to.</param>
 	/// <param name="connectParameters">Connection parameters. Contains platform specific parameters needed to achieved connection. The default value is None.</param>
 	/// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is None.</param>
-	/// <returns>A task that represents the asynchronous read operation. The Task will finish after the device has been connected successfuly.</returns>
+	/// <returns>A task that represents the asynchronous read operation. The Task will finish after the device has been connected successfully.</returns>
 	/// <exception cref="DeviceConnectionException">Thrown if the device connection fails.</exception>
 	/// <exception cref="ArgumentNullException">Thrown if the <paramref name="device"/> is null.</exception>
 	Task ConnectToDeviceAsync(IDevice device, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
@@ -149,7 +149,7 @@ public interface IAdapter
 	/// </summary>
 	/// <param name="device">Device to connect from.</param>
 	/// <param name="cancellationToken">The token to monitor for cancellation requests. The default value is None.</param>
-	/// <returns>A task that represents the asynchronous read operation. The Task will finish after the device has been disconnected successfuly.</returns>
+	/// <returns>A task that represents the asynchronous read operation. The Task will finish after the device has been disconnected successfully.</returns>
 	Task DisconnectDeviceAsync(IDevice device, CancellationToken cancellationToken = default);
 
 	/// <summary>

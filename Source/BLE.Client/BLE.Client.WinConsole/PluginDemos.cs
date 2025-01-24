@@ -12,10 +12,11 @@ using Windows.Devices.Enumeration;
 using Plugin.BLE;
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
-using Plugin.BLE.Abstractions.Contracts.Bonding;
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Utils;
 using Plugin.BLE.Extensions;
+using Plugin.BLE.Shared.Contracts.Pairing;
+
 using Plugin.BLE.Windows;
 
 
@@ -39,18 +40,17 @@ namespace BLE.Client.WinConsole
 			_discoveredDevices = [];
 			_bluetoothLe = CrossBluetoothLE.Current;
 			_adapter = CrossBluetoothLE.Current.Adapter;
-			_adapter.DeviceConnected += Adapter_DeviceConnected;
-			_adapter.DeviceDisconnected += Adapter_DeviceDisconnected;
-			_adapter.DeviceConnectionLost += Adapter_DeviceConnectionLost;
-			_adapter.DeviceConnectionError += Adapter_DeviceConnectionError;
+
+			_adapter.DeviceConnected += (sender, args) => Write($"{nameof(_adapter.DeviceConnected)} {args.Device.Id.ToHexBleAddress()} name: {args.Device.Name}");
+			_adapter.DeviceDisconnected += (sender, args) => Write($"{nameof(_adapter.DeviceDisconnected)} {args.Device.Id.ToHexBleAddress()} name: {args.Device.Name}");
+			_adapter.DeviceConnectionLost += (sender, args) => Write($"{nameof(_adapter.DeviceConnectionLost)} {args.Device.Id.ToHexBleAddress()} name: {args.Device.Name}");
+			_adapter.DeviceConnectionError += (sender, args) => Write($"{nameof(_adapter.DeviceConnectionError)} {args.Device.Id.ToHexBleAddress()} with name: {args.Device.Name}");
+
+			if (_adapter is IBondReport bondReport)
+				bondReport.DeviceBondStateChanged += static (_, args) => Trace.Message($"{nameof(bondReport.DeviceBondStateChanged)}: {args.State} {args.Address}");
+
 			_writer = writer;
 		}
-
-		private void Adapter_DeviceConnectionError(object? sender, DeviceErrorEventArgs e) => Write($"Adapter_DeviceConnectionError {e.Device.Id.ToHexBleAddress()} with name: {e.Device.Name}");
-
-		private void Adapter_DeviceDisconnected(object? sender, DeviceEventArgs e) => Write($"Adapter_DeviceDisconnected {e.Device.Id.ToHexBleAddress()} with name: {e.Device.Name}");
-
-		private void Adapter_DeviceConnected(object? sender, DeviceEventArgs e) => Write($"Adapter_DeviceConnected {e.Device.Id.ToHexBleAddress()} with name:  {e.Device.Name}");
 
 		private void Write(string format, params object[] args) => _writer?.Invoke(format, args);
 
@@ -58,46 +58,13 @@ namespace BLE.Client.WinConsole
 
 		public async Task TurnBluetoothOff() => await _bluetoothLe.TrySetStateAsync(false);
 
-		public IDevice ConnectToKnown(Guid id) => _adapter.ConnectToKnownDeviceAsync(id).Result;
+		public IDevice ConnectToKnown(Guid id) => _adapter.ConnectToKnownDeviceAsync(id).Result; // ToDO do this better. do all of this better...
 
-		public async Task Connect_Disconnect()
-		{
-			string bleAddress = BleAddressSelector.GetBleAddress();
-			var id = bleAddress.ToBleDeviceGuid();
-			var connectParameters = new ConnectParameters(connectionParameterSet: ConnectionParameterSet.ThroughputOptimized);
-			IDevice dev = await _adapter.ConnectToKnownDeviceAsync(id, connectParameters);
-			Write("Waiting 5 secs");
-			await Task.Delay(5000);
-
-			if (dev is { State: DeviceState.Connected })
-			{
-				Write("connect success");
-				Write("Disconnecting");
-				await _adapter.DisconnectDeviceAsync(dev);
-				if (dev.State != DeviceState.Connected)
-					Write("disconnect success");
-
-				dev.Dispose();
-			}
-			else
-				Write("fail");
-
-			Write("Test_Connect_Disconnect done");
-		}
-
-		public async Task GetSelectedStatus()
+		public async Task ShowSelectedStatus()
 		{
 			if (_selectedDevice == null)
 			{
 				Write("Request requires a Selected Device");
-				return;
-			}
-
-			if (_selectedDevice.NativeDevice is null)
-			{
-				Write("Underlying device is null, Device Unselected");
-				_selectedDevice.Dispose();
-				_selectedDevice = null;
 				return;
 			}
 
@@ -106,9 +73,11 @@ namespace BLE.Client.WinConsole
 			Write($"{nameof(_selectedDevice.State)}: {_selectedDevice.State}");
 			Write($"{nameof(_selectedDevice.SupportsIsConnectable)}: {_selectedDevice.SupportsIsConnectable}");
 			Write($"{nameof(_selectedDevice.IsConnectable)}: {_selectedDevice.IsConnectable}");
-			Write($"{nameof(_selectedDevice.BondState)}: {_selectedDevice.BondState}");
-			Write($"{nameof(_selectedDevice.Rssi)}: {_selectedDevice.Rssi}");
-			Write($"{nameof(_selectedDevice.AdvertisementRecords)}: {_selectedDevice.AdvertisementRecords.Count}");
+			if (_selectedDevice is IBondState bondableDevice)
+				Write($"{nameof(bondableDevice.BondState)}: {bondableDevice.BondState}");
+			Write($"Rssi: {_selectedDevice.GetRssi().Result}");
+			if (_selectedDevice.AdvertisementRecords != null)
+				Write($"{nameof(_selectedDevice.AdvertisementRecords)}: {_selectedDevice.AdvertisementRecords.Count}");
 			if (_adapter is IBondReport bondReportable)
 				Write($"Bonded: {(bondReportable.BondedDevices.Contains(_selectedDevice))}");
 			else
@@ -125,18 +94,18 @@ namespace BLE.Client.WinConsole
 
 			if (_selectedDevice.State is DeviceState.Connected or DeviceState.Connecting)
 			{
-				Write($"Device State: {_selectedDevice.State}. Request requires a Selected Disconnected Device");
+				Write($"Device State: {_selectedDevice.State}. Request requires the Selected to be Disconnected");
 				return;
 			}
 
-			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 			try
 			{
 				await _adapter.ConnectToDeviceAsync(_selectedDevice, new(connectionParameterSet: ConnectionParameterSet.PowerOptimized), cts.Token);
 			}
 			finally
 			{
-				Write($"Request {_selectedDevice.State}");
+				Write($"{nameof(ConnectSelected)}: {_selectedDevice.State}");
 			}
 		}
 
@@ -154,23 +123,15 @@ namespace BLE.Client.WinConsole
 				return;
 			}
 
-			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 			try
 			{
 				await _adapter.DisconnectDeviceAsync(_selectedDevice, cts.Token);
 			}
 			finally
 			{
-				Write($"Request result {_selectedDevice.State}");
+				Write($"{nameof(DisconnectSelected)} result {_selectedDevice.State}");
 			}
-		}
-
-		public async Task ShowBondState()
-		{
-			var id = BleAddressSelector.GetBleAddress().ToBleDeviceGuid();
-			IDevice dev = await _adapter.ConnectToKnownDeviceAsync(id);
-			Write("BondState: " + dev.BondState);
-			dev.Dispose();
 		}
 
 		public async Task Connect_Read_Services_Disconnect_Loop()
@@ -325,22 +286,6 @@ namespace BLE.Client.WinConsole
 			consoleReaderTask.Wait();
 		}
 
-		private async void Adapter_DeviceConnectionLost(object? sender, DeviceErrorEventArgs e)
-		{
-			Write($"Adapter_DeviceConnectionLost {e.Device.Id.ToHexBleAddress()} with name: {e.Device.Name}");
-			if (_reconnectDevice is not null && _reconnectDevice.Id == e.Device.Id)
-			{
-				_reconnectDevice.Dispose();
-				_reconnectDevice = null;
-				await Task.Delay(1000);
-				Write(new('-', 80));
-				Write("Lost connection!");
-				Write("To test reconnect: Move the device back in range / power on the device");
-				Write(new('-', 80));
-				_ = ConnectWorker(e.Device.Id);
-			}
-		}
-
 		public async Task Connect_Change_Parameters_Disconnect()
 		{
 			var id = BleAddressSelector.GetBleAddress().ToBleDeviceGuid();
@@ -362,7 +307,35 @@ namespace BLE.Client.WinConsole
 			Write("Test_Connect_Disconnect done");
 		}
 
-		 #region New Bonding
+		#region New Bonding
+
+		public Task ShowBondState()
+		{
+			if (_selectedDevice == null)
+			{
+				Write($"no device selected");
+				return Task.CompletedTask;
+			}
+
+			if (_selectedDevice is IBondState bondableDevice)
+				Write($"{nameof(bondableDevice.BondState)}: {bondableDevice.BondState}");
+			else
+				Write($"selected device doesn't support reporting the bond state");
+
+			return Task.CompletedTask;
+		}
+
+		public Task ShowConnectedDevices()
+		{
+			foreach (var device in _adapter.ConnectedDevices)
+			{
+				Trace.Message($"{nameof(device.Name)}: {device.Name}");
+				Trace.Message($"{nameof(device.Id)}: {device.Id}");
+				Trace.Message($"{nameof(device.State)}: {device.State}");
+			}
+
+			return Task.CompletedTask;
+		}
 
 		public async Task PairNone() => await Bond(PairModes.None);
 		public async Task PairConsent() => await Bond(PairModes.Consent);
@@ -396,7 +369,7 @@ namespace BLE.Client.WinConsole
 			}
 
 			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-			if (_adapter is IBondRequest bondable)
+			if (_adapter is IBondRequest bondRequest)
 			{
 				var pairProcess = _adapter as IPairProcess;
 				if (pairProcess != null)
@@ -404,8 +377,10 @@ namespace BLE.Client.WinConsole
 
 				try
 				{
-					var bondResult = await bondable.BondAsync(_selectedDevice, new(pairModes, _protectionLevel), cts.Token);
-					Write($"{nameof(bondResult.Status)}: {bondResult.Status}, {nameof(bondResult.Detail)}: {bondResult.Detail}, {nameof(bondResult.ProtectionUsed)}: {bondResult.ProtectionUsed}");
+					var iBondResult = await bondRequest.BondAsync(_selectedDevice, new(pairModes, _protectionLevel), cts.Token);
+					Write($"{nameof(iBondResult.Status)}: {iBondResult.Status}, {nameof(iBondResult.Detail)}: {iBondResult.Detail}");
+					if (iBondResult is BondResultManualPair bondResult)
+						Write($"{nameof(bondResult.Status)}: {bondResult.Status}, {nameof(bondResult.Detail)}: {bondResult.Detail}, {nameof(bondResult.ProtectionUsed)}: {bondResult.ProtectionUsed}");
 				}
 				catch (Exception ex)
 				{
@@ -455,56 +430,23 @@ namespace BLE.Client.WinConsole
 
 		#endregion New Bonding
 
-		public Task GetBondedDevices()
+		public Task ShowBondedDevices()
 		{
-			if (_adapter is IBondReport bondReportable)
+			if (_adapter is IBondReport bondReportableAdapter)
 			{
-				var i = 0;
-				foreach (var dev in bondReportable.BondedDevices)
-					Write($"{i++} Bonded device: {dev.Name} : {dev.Id}");
+				foreach (var device in bondReportableAdapter.BondedDevices)
+				{
+					Trace.Message($"{nameof(device.Name)}: {device.Name}");
+					Trace.Message($"{nameof(device.Id)}: {device.Id}");
+
+					if (device is IBondState bondableDevice)
+						Write($"{nameof(bondableDevice.BondState)}: {bondableDevice.BondState}");
+					else
+						Write($"selected device doesn't support reporting the bond state");
+				}
 			}
 
-			return Task.FromResult(true);
-		}
-
-		public async Task Pair_Connect_Disconnect()
-		{
-			var id = BleAddressSelector.GetBleAddress().ToBleDeviceGuid();
-			ulong bleAddressUlong = id.ToBleAddress();
-			DeviceInformation? deviceInformation;
-			using (BluetoothLEDevice nativeDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(bleAddressUlong))
-			{
-				deviceInformation = await DeviceInformation.CreateFromIdAsync(nativeDevice.DeviceId);
-			}
-
-			if (!deviceInformation.Pairing.IsPaired && deviceInformation.Pairing.CanPair)
-			{
-				Write("Starting custom pairing...");
-				deviceInformation.Pairing.Custom.PairingRequested += Custom_PairingRequested;
-				DevicePairingResult result = await deviceInformation.Pairing.Custom.PairAsync(DevicePairingKinds.ConfirmOnly, DevicePairingProtectionLevel.Encryption);
-				Write("Pairing result: " + result.Status);
-			}
-			else
-			{
-				Write("Already paired");
-			}
-			Write("Calling Adapter.ConnectToKnownDeviceAsync");
-			IDevice dev = await _adapter.ConnectToKnownDeviceAsync(id);
-			Write($"Calling Adapter.ConnectToKnownDeviceAsync done with {dev.Name}");
-			await Task.Delay(1000);
-			await dev.RequestMtuAsync(517);
-			Write("Waiting 3 secs");
-			await Task.Delay(3000);
-			Write("Disconnecting");
-			await _adapter.DisconnectDeviceAsync(dev);
-			dev.Dispose();
-			Write("Custom_Pair_Connect_Disconnect done");
-		}
-
-		private void Custom_PairingRequested(DeviceInformationCustomPairing sender, DevicePairingRequestedEventArgs args)
-		{
-			Write("Custom_PairingRequested -> Accept");
-			//args.Accept();
+			return Task.CompletedTask;
 		}
 
 		public async Task UnPairSelectedDevice()
@@ -576,7 +518,7 @@ namespace BLE.Client.WinConsole
 			Console.WriteLine();
 			foreach (var dev in _discoveredDevices)
 			{
-				Console.WriteLine($"{index++}: {dev.Id.ToHexBleAddress()} with Name = {dev.Name}");
+				Console.WriteLine($"{index++}: {dev.Id.ToHexBleAddress()} {dev.GetRssi().Result} = {dev.Name}");
 			}
 			if (_discoveredDevices.Count == 0)
 			{
@@ -613,29 +555,6 @@ namespace BLE.Client.WinConsole
 			}
 		}
 
-		/// <summary>
-		/// Connect to a device with a specific name
-		/// Assumes that DoTheScanning has been called and that the device is advertising
-		/// </summary>
-		/// <param name="name"></param>
-		/// <returns></returns>
-		public async Task<IDevice?> ConnectTest(string name)
-		{
-			if (!_isScanning)
-			{
-				Write("ConnectTest({0}) Failed - Call the DoTheScanning() method first!");
-				return null;
-			}
-
-			Thread.Sleep(10);
-			foreach (IDevice device in _discoveredDevices.Where(device => device.Name.Contains(name)))
-			{
-				await _adapter.ConnectToDeviceAsync(device);
-				return device;
-			}
-			return null;
-		}
-
 		public Task RunGetSystemConnectedOrPairedDevices()
 		{
 			IReadOnlyList<IDevice> devs = _adapter.GetConnectedOrBondedDevices();
@@ -647,35 +566,5 @@ namespace BLE.Client.WinConsole
 			}
 			return Task.CompletedTask;
 		}
-
-		/// <summary>
-		/// This demonstrates a bug where the known services is not cleared at disconnect (2023-11-03)
-		/// </summary>
-		public async Task ShowNumberOfServices()
-		{
-			string bleAddress = BleAddressSelector.GetBleAddress();
-			Write("Connecting to device with address = {0}", bleAddress);
-			IDevice dev = await _adapter.ConnectToKnownDeviceAsync(bleAddress.ToBleDeviceGuid()) ?? throw new("null");
-			string name = dev.Name;
-			Write("Connected to {0} {1} {2}", name, dev.Id.ToHexBleAddress(), dev.State);
-			Write("Calling dev.GetServicesAsync()...");
-			var services = await dev.GetServicesAsync();
-			Write("Found {0} services", services.Count);
-			Thread.Sleep(1000);
-			Write("Disconnecting from {0} {1}", name, dev.Id.ToHexBleAddress());
-			await _adapter.DisconnectDeviceAsync(dev);
-			Thread.Sleep(1000);
-			Write("ReConnecting to device {0} {1}...", name, dev.Id.ToHexBleAddress());
-			await _adapter.ConnectToDeviceAsync(dev);
-			Write("Connect Done.");
-			Thread.Sleep(1000);
-			Write("Calling dev.GetServicesAsync()...");
-			services = await dev.GetServicesAsync();
-			Write("Found {0} services", services.Count);
-			await _adapter.DisconnectDeviceAsync(dev);
-			Thread.Sleep(1000);
-		}
-
-		internal Task Disconnect(IDevice dev) => _adapter.DisconnectDeviceAsync(dev);
 	}
 }

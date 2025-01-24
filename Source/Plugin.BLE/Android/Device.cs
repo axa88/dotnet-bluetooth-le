@@ -17,22 +17,23 @@ using Plugin.BLE.Abstractions.Extensions;
 using Plugin.BLE.Abstractions.Utils;
 using Plugin.BLE.Android.CallbackEventArgs;
 using Plugin.BLE.Extensions;
+using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Rssi;
 
 using Trace = Plugin.BLE.Abstractions.Trace;
 
+
 namespace Plugin.BLE.Android;
 
-public class Device : DeviceBase<BluetoothDevice>
+public class Device : DeviceBase<BluetoothDevice>, IBondState
 {
 	/// <summary>
-	/// we have to keep a reference to this because Android's api is weird and requires
-	/// the GattServer in order to do nearly anything, including enumerating services
+	/// instance of the Gatt facilitating connections on Android
 	/// </summary>
 	internal BluetoothGatt Gatt;
 
 	/// <summary>
-	/// we also track this because of google's weird API. the gatt callback is where
-	/// we'll get notified when services are enumerated
+	/// Android has an event based model which is facilitated through the GatCallback
 	/// </summary>
 	private readonly GattCallback _gattCallback;
 
@@ -48,13 +49,41 @@ public class Device : DeviceBase<BluetoothDevice>
 	/// </summary>
 	public ConnectParameters ConnectParameters { get; private set; }
 
-	public Device(Adapter adapter, BluetoothDevice nativeDevice, BluetoothGatt gatt, int rssi = 0, byte[] advertisementData = null, bool isConnectable = true) : base(adapter, nativeDevice)
+	public Device(Adapter adapter, BluetoothDevice nativeDevice, BluetoothGatt gatt, byte[] advertisementData = null, bool isConnectable = true) : base(adapter, nativeDevice)
+	//public Device(Adapter adapter, BluetoothDevice nativeDevice, BluetoothGatt gatt, int rssi = 0, byte[] advertisementData = null, bool isConnectable = true) : base(adapter, nativeDevice)
 	{
 		Update(nativeDevice, gatt);
-		Rssi = rssi;
+		Rssi = new RssiBase();
 		AdvertisementRecords = ParseScanRecord(advertisementData);
 		IsConnectable = isConnectable;
 		_gattCallback = new(adapter, this);
+	}
+
+	public override async Task<IRssi> GetRssi(CancellationToken cancellationToken = default)
+	{
+		if (Gatt == null || _gattCallback == null) // ToDo Why cant State just be read? If it doesn't work fix it?
+		{
+			Trace.Message("You can't read the RSSI value for disconnected devices except on discovery on Android. Device is {0}", State);
+			return Rssi;
+		}
+
+		return await TaskBuilder.FromEvent<IRssi, EventHandler<RssiReadCallbackEventArgs>, EventHandler>(
+			execute: () => Gatt.ReadRemoteRssi(),
+			getCompleteHandler: (complete, reject) => (sender, args) =>
+			{
+				if (args.Error == null)
+					Rssi = new RssiBase { Timestamp = DateTime.Now, Value = args.Rssi is < 0 and >= sbyte.MinValue ? (sbyte)args.Rssi : default };
+				else
+					Trace.Message($"Failed to read RSSI for device {Id}-{Name}. {args.Error.Message}");
+
+				complete(Rssi);
+			},
+			subscribeComplete: handler => _gattCallback.RemoteRssiRead += handler,
+			unsubscribeComplete: handler => _gattCallback.RemoteRssiRead -= handler,
+			getRejectHandler: reject => (sender, args) => { reject(new($"Device {Name} disconnected while updating rssi.")); },
+			subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+			unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
+			token: cancellationToken);
 	}
 
 	public void Update(BluetoothDevice nativeDevice, BluetoothGatt gatt)
@@ -65,34 +94,34 @@ public class Device : DeviceBase<BluetoothDevice>
 		NativeDevice = nativeDevice;
 		Gatt = gatt;
 
-		Id = ParseDeviceId();
+		Id = ParseDeviceId(nativeDevice);
 		Name = NativeDevice.Name;
 	}
 
 	internal bool IsOperationRequested { get; set; }
 
-		protected override async Task<IReadOnlyList<IService>> GetServicesNativeAsync(CancellationToken cancellationToken)
+	protected override async Task<IReadOnlyList<IService>> GetServicesNativeAsync(CancellationToken cancellationToken)
+	{
+		if (_gattCallback == null || Gatt == null)
 		{
-			if (_gattCallback == null || Gatt == null)
-			{
-				return new List<IService>();
-			}
-
-			// Gatt.Services is already populated if device service discovery was already done
-			if (Gatt.Services.Any())
-			{
-				return Gatt.Services.Select(service => new Service(service, Gatt, _gattCallback, this)).ToList();
-			}
-
-			return await DiscoverServicesInternal(cancellationToken);
+			return new List<IService>();
 		}
 
-		protected override async Task<IService> GetServiceNativeAsync(Guid id, CancellationToken cancellationToken)
+		// Gatt.Services is already populated if device service discovery was already done
+		if (Gatt.Services.Any())
 		{
-			if (_gattCallback == null || Gatt == null)
-			{
-				return null;
-			}
+			return Gatt.Services.Select(service => new Service(service, Gatt, _gattCallback, this)).ToList();
+		}
+
+		return await DiscoverServicesInternal(cancellationToken);
+	}
+
+	protected override async Task<IService> GetServiceNativeAsync(Guid id, CancellationToken cancellationToken)
+	{
+		if (_gattCallback == null || Gatt == null)
+		{
+			return null;
+		}
 
 		var uuid = UUID.FromString(id.ToString("d"));
 
@@ -101,47 +130,44 @@ public class Device : DeviceBase<BluetoothDevice>
 		if (nativeService != null)
 			return new Service(nativeService, Gatt, _gattCallback, this);
 
-			var services = await DiscoverServicesInternal(cancellationToken);
-			return services?.FirstOrDefault(service => service.Id == id);
+		var services = await DiscoverServicesInternal(cancellationToken);
+		return services?.FirstOrDefault(service => service.Id == id);
+	}
+
+	private async Task<IReadOnlyList<IService>> DiscoverServicesInternal(CancellationToken cancellationToken)
+	{
+		if (Gatt == null)
+		{
+			Trace.Message("[Warning]: Can't discover services {0}. Gatt is null.", Name);
 		}
 
-		private async Task<IReadOnlyList<IService>> DiscoverServicesInternal(CancellationToken cancellationToken)
-		{
-			if (Gatt == null)
-			{
-				Trace.Message("[Warning]: Can't discover services {0}. Gatt is null.", Name);
-			}
-			
-			return await TaskBuilder
-				.FromEvent<IReadOnlyList<IService>, EventHandler<ServicesDiscoveredCallbackEventArgs>, EventHandler>(
-					execute: () =>
+		return await TaskBuilder
+			.FromEvent<IReadOnlyList<IService>, EventHandler<ServicesDiscoveredCallbackEventArgs>, EventHandler>(
+				execute: () =>
+				{
+					if (!Gatt.DiscoverServices())
 					{
-						if (!Gatt.DiscoverServices())
-						{
-							throw new Exception("Could not start service discovery");
-						}
-					},
-					getCompleteHandler: (complete, reject) => (sender, args) =>
+						throw new Exception("Could not start service discovery");
+					}
+				},
+				getCompleteHandler: (complete, reject) => (sender, args) =>
+				{
+					if (Gatt.Services == null)
 					{
-						if (Gatt.Services == null)
-						{
-							complete(new List<IService>());
-						}
-						else
-						{
-							complete(Gatt.Services.Select(service => new Service(service, Gatt, _gattCallback, this)).ToList());
-						}
-					},
-					subscribeComplete: handler => _gattCallback.ServicesDiscovered += handler,
-					unsubscribeComplete: handler => _gattCallback.ServicesDiscovered -= handler,
-					getRejectHandler: reject => (sender, args) =>
+						complete(new List<IService>());
+					}
+					else
 					{
-						reject(new Exception($"Device {Name} disconnected while fetching services."));
-					},
-					subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
-					unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
-					token: cancellationToken);
-		}
+						complete(Gatt.Services.Select(service => new Service(service, Gatt, _gattCallback, this)).ToList());
+					}
+				},
+				subscribeComplete: handler => _gattCallback.ServicesDiscovered += handler,
+				unsubscribeComplete: handler => _gattCallback.ServicesDiscovered -= handler,
+				getRejectHandler: reject => (sender, args) => { reject(new($"Device {Name} disconnected while fetching services.")); },
+				subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+				unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
+				token: cancellationToken);
+	}
 
 	public void Connect(ConnectParameters connectParameters, CancellationToken cancellationToken)
 	{
@@ -241,27 +267,46 @@ public class Device : DeviceBase<BluetoothDevice>
 		ClearServices();
 	}
 
-	protected override DeviceState GetState()
+	public override DeviceState State
 	{
-		var manager = (BluetoothManager)Application.Context.GetSystemService(Context.BluetoothService);
-		var state = manager.GetConnectionState(NativeDevice, ProfileType.Gatt);
-
-		return state switch
+		get
 		{
-			ProfileState.Connected =>
-				// if the device does not have a gatt instance we can't use it in the app, so we need to explicitly be able to connect it
-				// even if the profile state is connected
-				Gatt != null ? DeviceState.Connected : DeviceState.Limited,
-			ProfileState.Connecting => DeviceState.Connecting,
-			ProfileState.Disconnected or ProfileState.Disconnecting => DeviceState.Disconnected,
-			_ => DeviceState.Disconnected
-		};
+			var manager = (BluetoothManager)Application.Context.GetSystemService(Context.BluetoothService);
+			var state = manager.GetConnectionState(NativeDevice, ProfileType.Gatt);
+
+			return state switch
+			{
+				// if the device does not have a gatt instance we can't use it in the app, so we need to be able to explicitly connect it even if the profile state is connected
+				ProfileState.Connected when Gatt != null => DeviceState.Connected,
+				ProfileState.Connected => DeviceState.Limited,
+				ProfileState.Connecting => DeviceState.Connecting,
+				_ => DeviceState.Disconnected
+			};
+
+		}
 	}
 
-	private Guid ParseDeviceId()
+	//protected override DeviceState GetState()
+	//{
+	//	var manager = (BluetoothManager)Application.Context.GetSystemService(Context.BluetoothService);
+	//	var state = manager.GetConnectionState(NativeDevice, ProfileType.Gatt);
+
+	//	return state switch
+	//	{
+	//		ProfileState.Connected =>
+	//			// if the device does not have a gatt instance we can't use it in the app, so we need to explicitly be able to connect it
+	//			// even if the profile state is connected
+	//			Gatt != null ? DeviceState.Connected : DeviceState.Limited,
+	//		ProfileState.Connecting => DeviceState.Connecting,
+	//		ProfileState.Disconnected or ProfileState.Disconnecting => DeviceState.Disconnected,
+	//		_ => DeviceState.Disconnected
+	//	};
+	//}
+
+	private Guid ParseDeviceId(BluetoothDevice bluetoothDevice)
 	{
 		var deviceGuid = new byte[16];
-		var macWithoutColons = NativeDevice.Address.Replace(":", "");
+		var macWithoutColons = bluetoothDevice.Address.Replace(":", "");
 		var macBytes = Enumerable.Range(0, macWithoutColons.Length)
 			.Where(x => x % 2 == 0)
 			.Select(x => Convert.ToByte(macWithoutColons.Substring(x, 2), 16))
@@ -322,7 +367,7 @@ public class Device : DeviceBase<BluetoothDevice>
 				}
 
 				var record = new AdvertisementRecord((AdvertisementRecordType)type, data);
-				Trace.Message(record.ToString());
+				//Trace.Message(record.ToString()); // printing every received advert on local device while debugging is overbearing
 				records.Add(record);
 
 				//Advance
@@ -337,42 +382,41 @@ public class Device : DeviceBase<BluetoothDevice>
 		return records;
 	}
 
-		public override async Task<bool> UpdateRssiAsync(CancellationToken cancellationToken)
+	/*public override async Task<bool> UpdateRssiAsync(CancellationToken cancellationToken)
+	{
+		if (Gatt == null || _gattCallback == null) // ToDo Why cant GetState just be read? If it doesn't work fix it?
 		{
-			if (Gatt == null || _gattCallback == null)
-			{
-				Trace.Message("You can't read the RSSI value for disconnected devices except on discovery on Android. Device is {0}", State);
-				return false;
-			}
-
-			return await TaskBuilder.FromEvent<bool, EventHandler<RssiReadCallbackEventArgs>, EventHandler>(
-			  execute: () => Gatt.ReadRemoteRssi(),
-			  getCompleteHandler: (complete, reject) => (sender, args) =>
-			  {
-				  if (args.Error == null)
-				  {
-					  Trace.Message("Read RSSI for {0} {1}: {2}", Id, Name, args.Rssi);
-					  Rssi = args.Rssi;
-					  complete(true);
-				  }
-				  else
-				  {
-					  Trace.Message($"Failed to read RSSI for device {Id}-{Name}. {args.Error.Message}");
-					  complete(false);
-				  }
-			  },
-			  subscribeComplete: handler => _gattCallback.RemoteRssiRead += handler,
-			  unsubscribeComplete: handler => _gattCallback.RemoteRssiRead -= handler,
-			  getRejectHandler: reject => (sender, args) =>
-			  {
-				  reject(new Exception($"Device {Name} disconnected while updating rssi."));
-			  },
-			  subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
-			  unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
-			  token: cancellationToken);
+			Trace.Message("You can't read the RSSI value for disconnected devices except on discovery on Android. Device is {0}", State);
+			return false;
 		}
 
-		protected override async Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken)
+		return await TaskBuilder.FromEvent<bool, EventHandler<RssiReadCallbackEventArgs>, EventHandler>(
+			execute: () => Gatt.ReadRemoteRssi(),
+			getCompleteHandler: (complete, reject) => (sender, args) =>
+			{
+				if (args.Error == null)
+				{
+					Trace.Message($"Read RSSI for {0} {1}: {2}", Id, Name, args.Rssi);
+					//Rssi = new RssiBase() { Timestamp = DateTime.Now, Value = args.Rssi is < 0 and >= sbyte.MinValue ? (sbyte)args.Rssi : default };
+					Rssi.Timestamp = DateTime.Now;
+					Rssi.Value = args.Rssi is < 0 and >= sbyte.MinValue ? (sbyte)args.Rssi : default;
+					complete(true);
+				}
+				else
+				{
+					Trace.Message($"Failed to read RSSI for device {Id}-{Name}. {args.Error.Message}");
+					complete(false);
+				}
+			},
+			subscribeComplete: handler => _gattCallback.RemoteRssiRead += handler,
+			unsubscribeComplete: handler => _gattCallback.RemoteRssiRead -= handler,
+			getRejectHandler: reject => (sender, args) => { reject(new Exception($"Device {Name} disconnected while updating rssi.")); },
+			subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+			unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
+			token: cancellationToken);
+	}*/
+
+	protected override async Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken)
 		{
 			if (Gatt == null || _gattCallback == null)
 			{
@@ -438,8 +482,7 @@ public class Device : DeviceBase<BluetoothDevice>
 		}
 	}
 
-
-	public override bool IsConnectable { get; protected set; }
+	public override bool IsConnectable { get; }
 
 	public override bool SupportsIsConnectable
 	{
@@ -451,7 +494,9 @@ public class Device : DeviceBase<BluetoothDevice>
 		#endif
 	}
 
-	protected override DeviceBondState GetBondState()
+	public DeviceBondState BondState => NativeDevice == null ? DeviceBondState.NotSupported : NativeDevice.BondState.XPlatformBondState();
+
+	/*protected override DeviceBondState GetBondState()
 	{
 		if (NativeDevice == null)
 		{
@@ -460,7 +505,7 @@ public class Device : DeviceBase<BluetoothDevice>
 		}
 
 		return NativeDevice.BondState.XPlatformBondState();
-	}
+	}*/
 
 	public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default) => throw new NotImplementedException();
 }

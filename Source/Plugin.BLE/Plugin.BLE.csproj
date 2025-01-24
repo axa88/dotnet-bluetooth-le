@@ -129,4 +129,20 @@
 	  <None Remove="Shared\Utils\CancelableTaskSync.cs" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <Compile Include="Windows\SafeCreateDictionary.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\IRssi.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\RssiBase.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\ITimestamp.cs" />
+	</ItemGroup>
+
 </Project>

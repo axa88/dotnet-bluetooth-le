@@ -36,49 +36,6 @@ namespace BLE.Client.WinConsole
             writer?.Invoke(format, args);
         }
 
-        public async Task Connect_Disconnect()
-        {
-            string bleaddress = BleAddressSelector.GetBleAddress();
-            ulong bleaddressUl = bleaddress.ToBleDeviceGuid().ToBleAddress();
-            WBluetooth.BluetoothLEDevice dev = await WBluetooth.BluetoothLEDevice.FromBluetoothAddressAsync(bleaddressUl);
-            dev.RequestPreferredConnectionParameters(BluetoothLEPreferredConnectionParameters.ThroughputOptimized);
-            dev.ConnectionStatusChanged += Dev_ConnectionStatusChanged;
-            var devId = BluetoothDeviceId.FromId(dev.DeviceId);
-            Write("Connecting...");
-            var stopwatch = Stopwatch.StartNew();
-            GattSession gattSession = await GattSession.FromDeviceIdAsync(devId);
-            gattSession = await GattSession.FromDeviceIdAsync(devId);
-            gattSession.MaintainConnection = true;
-            gattSession.SessionStatusChanged += GattSession_SessionStatusChanged;
-            gattSession.MaxPduSizeChanged += GattSession_MaxPduSizeChanged;
-            if (!connectedSignal.WaitOne(10000))
-            {
-                Write("Not Connected!!!");
-                return;
-            }
-            Write("Connected in {0} ms", stopwatch.ElapsedMilliseconds);
-            var conpar = dev.GetConnectionParameters();
-            Write($"Connected with Latency = {conpar.ConnectionLatency}, "
-                + $"Interval = {conpar.ConnectionInterval}, Timeout = {conpar.LinkTimeout}, MaxPdu = {gattSession.MaxPduSize}");
-
-            Thread.Sleep(100);
-            Write("Now Sleeing 4 secs...");
-            Thread.Sleep(4000);
-            disconnectedSignal.Reset();
-            Write("Disconnecting...");
-            stopwatch = Stopwatch.StartNew();
-
-            gattSession.MaintainConnection = false;
-            gattSession.Dispose();
-            dev.Dispose();
-            if (!disconnectedSignal.WaitOne(10000))
-            {
-                Write("Not Disconnected!!!");
-                return;
-            }
-            Write("Disconnected in {0} ms", stopwatch.ElapsedMilliseconds);
-        }
-
         public async Task UnPairAllBleDevices()
         {
             string aqsFilter = BluetoothLEDevice.GetDeviceSelector();

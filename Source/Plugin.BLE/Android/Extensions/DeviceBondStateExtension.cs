@@ -2,7 +2,7 @@
 
 using Android.Bluetooth;
 using Plugin.BLE.Abstractions;
-using Plugin.BLE.Abstractions.Contracts.Bonding;
+using Plugin.BLE.Shared.Contracts.Pairing;
 
 
 namespace Plugin.BLE.Extensions;
@@ -11,17 +11,13 @@ internal static class DeviceBondStateExtension
 {
 	public static DeviceBondState XPlatformBondState(this Bond bondState)
 	{
-		switch (bondState)
+		return bondState switch
 		{
-			case Bond.None:
-				return DeviceBondState.NotBonded;
-			case Bond.Bonding:
-				return DeviceBondState.Bonding;
-			case Bond.Bonded:
-				return DeviceBondState.Bonded;
-			default:
-				return DeviceBondState.NotSupported;
-		}
+			Bond.None => DeviceBondState.NotBonded,
+			Bond.Bonding => DeviceBondState.Bonding,
+			Bond.Bonded => DeviceBondState.Bonded,
+			_ => DeviceBondState.NotSupported
+		};
 	}
 
 	internal static BondStatus XPlatformBondStatus(this Bond pairStatus)

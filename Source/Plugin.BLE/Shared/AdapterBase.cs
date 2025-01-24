@@ -127,7 +127,7 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Dictionary of all discovered devices, indexed by Guid.
 	/// </summary>
-	protected ConcurrentDictionary<Guid, IDevice> DiscoveredDevicesRegistry { get; } = new();
+	private ConcurrentDictionary<Guid, IDevice> DiscoveredDevicesRegistry { get; } = new();
 
 	/// <summary>
 	/// List of all discovered devices.
@@ -150,10 +150,8 @@ public abstract class AdapterBase : IAdapter
 		DeviceAdvertised?.Invoke(this, new(device));
 
 		// TODO (sms): check equality implementation of device
-		if (!DiscoveredDevicesRegistry.TryAdd(device.Id, device))
-			return;
-
-		DeviceDiscovered?.Invoke(this, new(device));
+		if (DiscoveredDevicesRegistry.TryAdd(device.Id, device))
+			DeviceDiscovered?.Invoke(this, new(device));
 	}
 
 	/// <summary>
@@ -205,14 +203,14 @@ public abstract class AdapterBase : IAdapter
 	public event EventHandler<DeviceErrorEventArgs> DeviceConnectionError;
 
 	/// <summary>
-	/// Used to store all connected devices
-	/// </summary>
-	public ConcurrentDictionary<string, IDevice> ConnectedDeviceRegistry { get; } = new();
-
-	/// <summary>
 	/// List of all connected devices.
 	/// </summary>
-	public IReadOnlyList<IDevice> ConnectedDevices => ConnectedDeviceRegistry.Values.ToList();
+	public virtual IReadOnlyList<IDevice> ConnectedDevices => ConnectedDeviceRegistry.Values.ToList();
+
+	/// <summary>
+	/// Used to store all connected devices
+	/// </summary>
+	protected internal ConcurrentDictionary<string, IDevice> ConnectedDeviceRegistry { get; } = new();
 
 	/// <summary>
 	/// Connects to the <paramref name="device"/>.
@@ -255,9 +253,27 @@ public abstract class AdapterBase : IAdapter
 				},
 				subscribeReject: handler => DeviceConnectionError += handler,
 				unsubscribeReject: handler => DeviceConnectionError -= handler,
-				token: cts.Token, mainthread: false
+				token: cts.Token, mainThread: false
 			);
 		}
+	}
+
+	/// <summary>
+	/// Connects to a device with a known GUID without scanning and if in range. Does not scan for devices.
+	/// </summary>
+	public async Task<IDevice> ConnectToKnownDeviceAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default)
+	{
+		if (DiscoveredDevicesRegistry.TryGetValue(deviceGuid, out var discoveredDevice))
+		{
+			await ConnectToDeviceAsync(discoveredDevice, connectParameters, cancellationToken);
+			return discoveredDevice;
+		}
+
+		var connectedDevice = await ConnectToKnownDeviceNativeAsync(deviceGuid, connectParameters, cancellationToken);
+		if (!DiscoveredDevicesRegistry.ContainsKey(deviceGuid))
+			DiscoveredDevicesRegistry.TryAdd(deviceGuid, connectedDevice);
+
+		return connectedDevice;
 	}
 
 	/// <summary>
@@ -301,18 +317,33 @@ public abstract class AdapterBase : IAdapter
 	}
 
 	/// <summary>
+	/// Native implementation of ConnectToDeviceAsync.
+	/// </summary>
+	protected abstract Task ConnectToDeviceNativeAsync(IDevice device, ConnectParameters connectParameters, CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Native implementation of DisconnectDeviceAsync.
+	/// </summary>
+	protected abstract void DisconnectDeviceNative(IDevice device);
+
+	/// <summary>
+	/// Native implementation of ConnectToKnownDeviceAsync.
+	/// </summary>
+	protected abstract Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
+
+	/// <summary>
 	/// Handle connection of a new device.
 	/// </summary>
-	public void HandleConnectedDevice(IDevice device) => DeviceConnected?.Invoke(this, new(device));
+	protected internal void HandleConnectedDevice(IDevice device) => DeviceConnected?.Invoke(this, new(device));
 
 	/// <summary>
 	/// Handle disconnection of a device.
 	/// </summary>
-	public void HandleDisconnectedDevice(bool disconnectRequested, IDevice device, string message = "")
+	protected internal void HandleDisconnectedDevice(bool disconnectRequested, IDevice device, string message = "")
 	{
 		if (disconnectRequested)
 		{
-			Trace.Message($"DisconnectedPeripheral by user: {device.Name}");
+			Trace.Message($"DisconnectedPeripheral by user: {device?.Name}");
 			DeviceDisconnected?.Invoke(this, new(device));
 		}
 		else
@@ -329,46 +360,15 @@ public abstract class AdapterBase : IAdapter
 	/// <summary>
 	/// Handle connection failure.
 	/// </summary>
-	public void HandleConnectionFail(IDevice device, string errorMessage)
+	protected internal void HandleConnectionFail(IDevice device, string errorMessage)
 	{
 		Trace.Message($"Failed to connect peripheral {device.Id}: {device.Name}");
 		DeviceConnectionError?.Invoke(this, new(device, errorMessage));
 	}
 
-	/// <summary>
-	/// Connects to a device with a known GUID without scanning and if in range. Does not scan for devices.
-	/// </summary>
-	public async Task<IDevice> ConnectToKnownDeviceAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default)
-	{
-		if (DiscoveredDevicesRegistry.TryGetValue(deviceGuid, out var discoveredDevice))
-		{
-			await ConnectToDeviceAsync(discoveredDevice, connectParameters, cancellationToken);
-			return discoveredDevice;
-		}
-
-		var connectedDevice = await ConnectToKnownDeviceNativeAsync(deviceGuid, connectParameters, cancellationToken);
-		if (!DiscoveredDevicesRegistry.ContainsKey(deviceGuid))
-			DiscoveredDevicesRegistry.TryAdd(deviceGuid, connectedDevice);
-
-		return connectedDevice;
-	}
-
-	/// <summary>
-	/// Native implementation of ConnectToDeviceAsync.
-	/// </summary>
-	protected abstract Task ConnectToDeviceNativeAsync(IDevice device, ConnectParameters connectParameters, CancellationToken cancellationToken);
-
-	/// <summary>
-	/// Native implementation of DisconnectDeviceAsync.
-	/// </summary>
-	protected abstract void DisconnectDeviceNative(IDevice device);
-
-	/// <summary>
-	/// Native implementation of ConnectToKnownDeviceAsync.
-	/// </summary>
-	protected abstract Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
-
 	#endregion Connection
+
+	#region Connect + Bond
 
 	/// <summary>
 	/// Returns all BLE devices connected to the system.
@@ -379,6 +379,8 @@ public abstract class AdapterBase : IAdapter
 	/// Returns a list of paired BLE devices for the given UUIDs.
 	/// </summary>
 	public abstract IReadOnlyList<IDevice> GetConnectedOrBondedDevicesByIds(Guid[] ids);
+
+	#endregion Connect + Bond
 
 	/// <summary>
 	/// Indicates whether the Coded PHY feature (BLE5) is supported.

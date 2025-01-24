@@ -237,8 +237,9 @@ namespace BLE.Client.Maui.ViewModels
                 //update rssi for already connected devices (so that 0 is not shown in the list)
                 try
                 {
-                    await connectedDevice.UpdateRssiAsync();
-                }
+                    //await connectedDevice.UpdateRssiAsync();
+					await connectedDevice.GetRssi();
+				}
                 catch (Exception ex)
                 {
                     ShowMessage($"Failed to update RSSI for {connectedDevice.Name}. Error: {ex.Message}");

@@ -91,7 +91,7 @@ namespace BLE.Client.Maui.ViewModels
         {
             DeviceId = device.Id;
             Name = device.Name;
-            Rssi = device.Rssi;
+            Rssi = device.GetRssi().Result.Value;
             IsConnectable = device.IsConnectable;
             AdvertisementRecords = device.AdvertisementRecords;
             State = device.State;

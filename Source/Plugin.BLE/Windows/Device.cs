@@ -1,63 +1,96 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Windows.Devices.Bluetooth;
+using Windows.Devices.Bluetooth.GenericAttributeProfile;
 
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Extensions;
-
-using Windows.Devices.Bluetooth;
-using Windows.Devices.Bluetooth.GenericAttributeProfile;
-using Windows.Devices.Enumeration;
+using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Rssi;
 
 
 namespace Plugin.BLE.Windows;
 
-public class Device : DeviceBase<BluetoothLEDevice>
+public class Device : DeviceBase<BluetoothLEDevice>, IBondState
 {
 	private GattSession _gattSession;
 	private bool _isDisposed;
 
-	public Device(Adapter adapter, BluetoothLEDevice nativeDevice, int rssi, Guid id, IReadOnlyList<AdvertisementRecord> advertisementRecords = null, bool isConnectable = true) : base(adapter, nativeDevice)
+	public Device(IAdapter adapter, Guid id, string name, bool isConnectable) : base(adapter, isConnectable)
 	{
-		Rssi = rssi;
 		Id = id;
-		Name = nativeDevice.Name;
-		AdvertisementRecords = advertisementRecords;
-		IsConnectable = isConnectable;
-	}
-
-	internal void Update(short btAdvRawSignalStrengthInDBm, IReadOnlyList<AdvertisementRecord> advertisementData)
-	{
-		Rssi = btAdvRawSignalStrengthInDBm;
-		AdvertisementRecords = advertisementData;
-	}
-
-	public override Task<bool> UpdateRssiAsync(CancellationToken cancellationToken)
-	{
-		//No current method to update the Rssi of a device
-		//In future implementations, maybe listen for device's advertisements
-
-		Trace.Message("Request RSSI not supported in Windows");
-		return Task.FromResult(false);
-	}
-
-	public void DisposeNativeDevice()
-	{
-		if (NativeDevice is not null)
+		Rssi = new RssiBase();
+		Name = !string.IsNullOrWhiteSpace(name) ? name : Name;
+		NativeDevice = BluetoothLEDevice.FromBluetoothAddressAsync(id.ToBleAddress()).GetAwaiter().GetResult(); // ToDO deal with this
+		if (NativeDevice != null)
 		{
-			NativeDevice.Dispose();
-			NativeDevice = null;
+			DeviceId = NativeDevice.DeviceId;
+			Name = string.IsNullOrWhiteSpace(NativeDevice.Name) ? Name : NativeDevice.Name;
+			CanPair = NativeDevice.DeviceInformation.Pairing.CanPair;
+
+			NativeDevice.ConnectionStatusChanged += OnConnectionStatusChanged;
+
+			Trace.Message($"{nameof(NativeDevice.BluetoothDeviceId.Id)}: {NativeDevice.BluetoothDeviceId.Id}");
+			Trace.Message($"{nameof(NativeDevice.DeviceId)}: {NativeDevice.DeviceId}");
 		}
+
+		Trace.Message($"Constructed: native : {(NativeDevice == null ? "nul" : "object")}");
 	}
 
-	public async Task RecreateNativeDevice()
+	~Device() => DisposeGattSession();
+
+	protected BluetoothLEDevice BluetoothLeDevice { get; private set; } // ToDo use this to replace NativeDevice as platform specific objects shouldn't be in the contract or even in the base, but if it is it should be overridable with maximum protection
+	public bool? CanPair { get; protected internal set; }
+	public bool IsBonded { get; protected internal set; }
+	public bool IsConnected { get; protected internal set; }
+	protected internal string DeviceId { get; set; }
+
+	public sealed override string Name { get; protected internal set; } = "";
+
+	public override Task<IRssi> GetRssi(CancellationToken cancellationToken = default) => Task.FromResult(Rssi);
+
+	public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default) => RequestPreferredConnectionParameters(NativeDevice, connectParameters);
+
+	public DeviceBondState BondState => !IsConnectable ? DeviceBondState.NotSupported : IsBonded ? DeviceBondState.Bonded : DeviceBondState.NotBonded;
+
+	protected internal async Task<bool> ConnectInternal(ConnectParameters connectParameters, CancellationToken cancellationToken)
 	{
+		if (SupportsIsConnectable && !IsConnectable)
+			return await Task.FromResult(false);
+
+		try
+		{
+			_gattSession = await GattSession.FromDeviceIdAsync(BluetoothDeviceId.FromId(DeviceId)).AsTask(cancellationToken);
+			if (_gattSession is not null)
+			{
+				_gattSession.MaintainConnection = true;
+				_gattSession.SessionStatusChanged += OnGattSessionStatusChanged;
+				_gattSession.MaxPduSizeChanged += OnGattSessionMaxPduSizeChanged;
+
+				RequestPreferredConnectionParameters(NativeDevice, connectParameters);
+			}
+		}
+		catch (Exception e)
+		{
+			Console.WriteLine(e.Message);
+			DisposeGattSession();
+			throw;
+		}
+
+		return await Task.FromResult(_gattSession != null);
+	}
+
+	protected internal void DisconnectInternal()
+	{
+		DisposeGattSession();
+		ClearServices();
 		DisposeNativeDevice();
-		var bleAddress = Id.ToBleAddress();
-		NativeDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(bleAddress);
 	}
 
 	protected override async Task<IReadOnlyList<IService>> GetServicesNativeAsync(CancellationToken cancellationToken)
@@ -79,21 +112,9 @@ public class Device : DeviceBase<BluetoothLEDevice>
 		return nativeService != null ? new Service(nativeService, this) : null;
 	}
 
-	protected override DeviceState GetState()
-	{
-		if (NativeDevice is null)
-			return DeviceState.Disconnected;
+	public override DeviceState State => IsConnected ? DeviceState.Connected : DeviceState.Disconnected;
 
-		// This is the case if the OS already is connected, but the ConnectInternal method has not yet been called
-		// Because the gattSession is created in the ConnectInternal method
-		if (_gattSession is null)
-			return DeviceState.Limited;
-
-		if (NativeDevice.ConnectionStatus == BluetoothConnectionStatus.Connected)
-			return DeviceState.Connected;
-
-		return NativeDevice.WasSecureConnectionUsedForPairing ? DeviceState.Limited : DeviceState.Disconnected;
-	}
+	//protected override DeviceState GetState() => NativeDevice?.ConnectionStatus == BluetoothConnectionStatus.Connected ? DeviceState.Connected : DeviceState.Disconnected;
 
 	protected override Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken)
 	{
@@ -113,70 +134,78 @@ public class Device : DeviceBase<BluetoothLEDevice>
 		return false;
 	}
 
-	private static bool MaybeRequestPreferredConnectionParameters(BluetoothLEDevice device, ConnectParameters connectParameters)
+	protected internal async Task<bool> VerifyUnderlyingDevice([CallerMemberName] string caller = null)
 	{
-		#if WINDOWS10_0_22000_0_OR_GREATER
-		if (Environment.OSVersion.Version.Build < 22000)
+		if (NativeDevice == null)
 		{
-			return false;
+			NativeDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(Id.ToBleAddress());
+			//NativeDevice = await BluetoothLEDevice.FromIdAsync(DeviceId);
+
+			if (IsConnectable && NativeDevice == null)
+				Trace.Message($"********** Holy shit a connectable device cant get underlying ***********");
+
+			if (NativeDevice != null) // else must be a non-connectable beacon type
+			{
+				DeviceId = NativeDevice.DeviceId;
+				Name = string.IsNullOrWhiteSpace(Name) ? Name : NativeDevice.Name;
+				CanPair = NativeDevice.DeviceInformation.Pairing.CanPair;
+			}
 		}
-		BluetoothLEPreferredConnectionParameters parameters = null;
-		switch(connectParameters.ConnectionParameterSet)
-		{
-			case ConnectionParameterSet.Balanced:
-				parameters = BluetoothLEPreferredConnectionParameters.Balanced;
-				break;
-			case ConnectionParameterSet.PowerOptimized:
-				parameters = BluetoothLEPreferredConnectionParameters.PowerOptimized;
-				break;
-			case ConnectionParameterSet.ThroughputOptimized:
-				parameters = BluetoothLEPreferredConnectionParameters.ThroughputOptimized;
-				break;
-			case ConnectionParameterSet.None:
-			default:
-				break;
-		}
-		if (parameters is not null)
-		{
-			var conreq = device.RequestPreferredConnectionParameters(parameters);
-			Trace.Message($"RequestPreferredConnectionParameters({connectParameters.ConnectionParameterSet}): {conreq.Status}");
-			return conreq.Status == BluetoothLEPreferredConnectionParametersRequestStatus.Success;
-		}
-		return true;
-		#else
-			return false;
-	#endif
+		return NativeDevice != null;
 	}
 
-	public async Task<bool> ConnectInternal(ConnectParameters connectParameters, CancellationToken cancellationToken)
+	private static bool RequestPreferredConnectionParameters(BluetoothLEDevice device, ConnectParameters connectParameters)
 	{
-		// ref https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothledevice.frombluetoothaddressasync
-		// Creating a BluetoothLEDevice object by calling this method alone doesn't (necessarily) initiate a connection.
-		// To initiate a connection, set GattSession.MaintainConnection to true, or call an uncached service discovery
-		// method on BluetoothLEDevice, or perform a read/write operation against the device.
-		// 2024-04-22: Note, that The DeviceInformation.Pairing.Custom.PairAsync also initiates a connection
-		if (NativeDevice is null)
-		{
-			Trace.Message("ConnectInternal says: Cannot connect since NativeDevice is null");
+		if (device?.ConnectionStatus != BluetoothConnectionStatus.Connected)
 			return false;
-		}
-		try
+
+		#if WINDOWS10_0_22000_0_OR_GREATER
+		var parameters = connectParameters.ConnectionParameterSet switch
 		{
-			MaybeRequestPreferredConnectionParameters(NativeDevice, connectParameters);
-			var devId = BluetoothDeviceId.FromId(NativeDevice.DeviceId);
-			_gattSession = await GattSession.FromDeviceIdAsync(devId);
-			_gattSession.MaintainConnection = true;
-			_gattSession.SessionStatusChanged += GattSession_SessionStatusChanged;
-			_gattSession.MaxPduSizeChanged += GattSession_MaxPduSizeChanged;
-		}
-		catch (Exception ex)
-		{
-			Trace.Message("WARNING ConnectInternal failed: {0}", ex.Message);
-			DisposeGattSession();
+			ConnectionParameterSet.Balanced => BluetoothLEPreferredConnectionParameters.Balanced,
+			ConnectionParameterSet.PowerOptimized => BluetoothLEPreferredConnectionParameters.PowerOptimized,
+			ConnectionParameterSet.ThroughputOptimized => BluetoothLEPreferredConnectionParameters.ThroughputOptimized,
+			_ => null
+		};
+
+		if (parameters == null)
 			return false;
+
+		return device.RequestPreferredConnectionParameters(parameters).Status == BluetoothLEPreferredConnectionParametersRequestStatus.Success;
+		#else
+		return false;
+		#endif
+	}
+
+	private static void OnConnectionStatusChanged(BluetoothLEDevice nativeDevice, object args) { Trace.Message($"{nameof(nativeDevice.ConnectionStatus)}: {nativeDevice.ConnectionStatus}"); }
+
+	private void OnGattSessionStatusChanged(GattSession session, GattSessionStatusChangedEventArgs args)
+	{
+		Trace.Message($"{nameof(OnGattSessionStatusChanged)} => {nameof(args.Status)}: {args.Status}, {nameof(args.Error)}: {args.Error}");
+		Trace.Message($"{nameof(DeviceState)}: {State}");
+
+		switch (args.Status)
+		{
+			case GattSessionStatus.Closed:
+			case GattSessionStatus.Active:
+				Trace.Message($"{nameof(GattSessionStatus)} {args.Status}");
+				break;
 		}
-		var success = _gattSession != null;
-		return success;
+	}
+
+	private static void OnGattSessionMaxPduSizeChanged(GattSession sender, object args)
+	{
+		Trace.Message("GattSession_MaxPduSizeChanged: {0}", sender.MaxPduSize);
+	}
+
+	private void DisposeNativeDevice()
+	{
+		if (NativeDevice != null)
+		{
+			NativeDevice.ConnectionStatusChanged -= OnConnectionStatusChanged;
+			NativeDevice?.Dispose();
+			NativeDevice = null;
+		}
 	}
 
 	private void DisposeGattSession()
@@ -184,28 +213,11 @@ public class Device : DeviceBase<BluetoothLEDevice>
 		if (_gattSession != null)
 		{
 			_gattSession.MaintainConnection = false;
-			_gattSession.MaxPduSizeChanged -= GattSession_MaxPduSizeChanged;
-			_gattSession.SessionStatusChanged -= GattSession_SessionStatusChanged;
+			_gattSession.MaxPduSizeChanged -= OnGattSessionMaxPduSizeChanged;
+			_gattSession.SessionStatusChanged -= OnGattSessionStatusChanged;
 			_gattSession.Dispose();
 			_gattSession = null;
 		}
-	}
-
-	private void GattSession_SessionStatusChanged(GattSession sender, GattSessionStatusChangedEventArgs args)
-	{
-		Trace.Message("GattSession_SessionStatusChanged: " + args.Status);
-	}
-
-	private void GattSession_MaxPduSizeChanged(GattSession sender, object args)
-	{
-		Trace.Message("GattSession_MaxPduSizeChanged: {0}", sender.MaxPduSize);
-	}
-
-	public void DisconnectInternal()
-	{
-		DisposeGattSession();
-		ClearServices();
-		DisposeNativeDevice();
 	}
 
 	public override void Dispose()
@@ -226,24 +238,4 @@ public class Device : DeviceBase<BluetoothLEDevice>
 			// ignored
 		}
 	}
-
-	~Device()
-	{
-		DisposeGattSession();
-	}
-
-	public override bool IsConnectable { get; protected set; }
-
-	public override bool SupportsIsConnectable => true;
-
-		protected override DeviceBondState GetBondState()
-		{
-			if (NativeDevice == null)
-				NativeDevice = BluetoothLEDevice.FromBluetoothAddressAsync(Id.ToBleAddress()).AsTask().Result;
-
-			var deviceInformation = DeviceInformation.CreateFromIdAsync(NativeDevice.DeviceId).AsTask().Result;
-					return deviceInformation.Pairing.IsPaired ? DeviceBondState.Bonded : DeviceBondState.NotBonded;
-				}
-
-	public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default) => MaybeRequestPreferredConnectionParameters(NativeDevice, connectParameters);
 }

@@ -17,23 +17,23 @@ using (var ct = new ConsoleTracer())
 	{
 		{ConsoleKey.N, new("Turn Bluetooth ON", pdDemos.TurnBluetoothOn) },
 		{ConsoleKey.F, new("Turn Bluetooth OFF", pdDemos.TurnBluetoothOff) },
-		{ConsoleKey.D1, new("Discover and set the BleAddress", pdDemos.DiscoverAndSelect) },
+		{ConsoleKey.D1, new("Discover and select Ble Device", pdDemos.DiscoverAndSelect) },
 		{ConsoleKey.D2, new("Set the BleAddress", BleAddressSelector.NewBleAddress) },
-		{ConsoleKey.D3, new("Connect -> Disconnect", pdDemos.Connect_Disconnect) },
-		{ConsoleKey.D4, new("Pair -> Connect -> Disconnect", pdDemos.Pair_Connect_Disconnect) },
 		{ConsoleKey.D5, new("Connect -> Change Parameters -> Disconnect", pdDemos.Connect_Change_Parameters_Disconnect) },
 		{ConsoleKey.D6, new("Run GetSystemConnectedOrPairedDevices", pdDemos.RunGetSystemConnectedOrPairedDevices) },
 		{ConsoleKey.D7, new("Loop: Connect -> Read services -> Disconnect", pdDemos.Connect_Read_Services_Disconnect_Loop) },
 		{ConsoleKey.D8, new("Loop: Connect -> Read services -> Dispose", pdDemos.Connect_Read_Services_Dispose_Loop) },
 		{ConsoleKey.D9, new("Connect -> Loop: ConnectionLost -> Connect", pdDemos.Connect_ConnectionLost_Reconnect) },
-		{ConsoleKey.W, new("Adapter.BondedDevices", pdDemos.GetBondedDevices) },
 		{ConsoleKey.S, new("Device.BondState", pdDemos.ShowBondState) },
-		{ConsoleKey.T, new("Pure Windows: Connect -> Disconnect", wdemos.Connect_Disconnect) },
-		{ConsoleKey.U, new("Pure Windows: Unpair all BLE devices", wdemos.UnPairAllBleDevices) },
 
-		{ConsoleKey.G, new($"{nameof(pdDemos.GetSelectedStatus)}", pdDemos.GetSelectedStatus) },
+
+		{ConsoleKey.X, new($"{nameof(pdDemos.ShowConnectedDevices)}", pdDemos.ShowConnectedDevices) },
+		{ConsoleKey.W, new($"{nameof(pdDemos.ShowBondedDevices)}", pdDemos.ShowBondedDevices) },
+
+		{ConsoleKey.G, new($"{nameof(pdDemos.ShowSelectedStatus)}", pdDemos.ShowSelectedStatus) },
 		{ConsoleKey.E, new($"{nameof(pdDemos.ConnectSelected)}", pdDemos.ConnectSelected) },
 		{ConsoleKey.D, new($"{nameof(pdDemos.DisconnectSelected)}", pdDemos.DisconnectSelected) },
+
 		{ConsoleKey.O, new($"{nameof(pdDemos.PairNone)}", pdDemos.PairNone) },
 		{ConsoleKey.C, new($"{nameof(pdDemos.PairConsent)}", pdDemos.PairConsent) },
 		{ConsoleKey.I, new($"{nameof(pdDemos.PairDisplayPin)}", pdDemos.PairDisplayPin) },

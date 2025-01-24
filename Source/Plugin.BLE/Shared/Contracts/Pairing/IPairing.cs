@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Plugin.BLE.Abstractions;
+using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Abstractions.EventArgs;
 
 
-namespace Plugin.BLE.Abstractions.Contracts.Bonding;
+namespace Plugin.BLE.Shared.Contracts.Pairing;
 
 /// <summary>
-/// Indicate an <see cref="IAdapter"/> is able to support bond reporting on a platform
+/// Indicate the platform's <see cref="IAdapter"/> is able to support monitor Bonded Devices
 /// </summary>
 public interface IBondReport
 {
@@ -26,7 +28,7 @@ public interface IBondReport
 
 
 /// <summary>
-/// Indicate an <see cref="IAdapter"/> is able to programmatically request device Bonding, and is compatible with Xplatform Bonding signatures with optional pairing parameters and results.
+/// Indicate the platform's <see cref="IAdapter"/> is able to programmatically request Device Bonding
 /// </summary>
 public interface IBondRequest
 {
@@ -37,12 +39,12 @@ public interface IBondRequest
 	/// <param name="bondingOptions"> For use when the platform's <see cref="IAdapter"/> able to accept pairing options </param>
 	/// <param name="cancellationToken"> To cancel the Bonding process </param>
 	/// <returns></returns>
-	public Task<BondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default);
+	public Task<IBondResult> BondAsync(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default);
 }
 
 
 /// <summary>
-/// Indicate an <see cref="IAdapter"/> is able to programmatically process pairing requests
+/// Indicate the platform's <see cref="IAdapter"/> is able to programmatically process pairing requests
 /// </summary>
 public interface IPairProcess
 {
@@ -99,6 +101,18 @@ public interface IPairProcess
 
 
 /// <summary>
+/// Indicate a <see cref="IDevice"/> is able to report its Current platform Bond state
+/// </summary>
+public interface IBondState
+{
+	/// <summary>
+	/// Gets the bond state of a device.
+	/// </summary>
+	DeviceBondState BondState { get; }
+}
+
+
+/// <summary>
 /// Suggested pairing options when requesting a Bond
 /// </summary>
 /// <param name="requestedModes"> Any or all modes acceptable for the application </param>
@@ -110,14 +124,27 @@ public class BondingOptions(PairModes requestedModes = PairModes.None, Protectio
 }
 
 
+public interface IBondResult
+{
+	public BondStatus Status { get; }
+	public string Detail { get; }
+}
+
+
+public class BondResult(BondStatus status, string detail = "") : IBondResult
+{
+	public BondStatus Status { get; } = status;
+	public string Detail { get; } = detail;
+}
+
 /// <summary>
 /// The final results of the Bond Request
 /// </summary>
 /// <param name="status"> Result status. This depends on platforms cooperation in reporting.
 /// In addition to success, Windows and Android to a lesser extent may report information on failure </param>
-/// <param name="detail"> String representation of the <see cref="BondResult.Status" /> </param>
+/// <param name="detail"> String representation of the <see cref="BondResultManualPair.Status" /> </param>
 /// <param name="protectionUsed"> The negotiated protection level (Authentication and or Encryption) used for communication with the remote device </param>
-public class BondResult(BondStatus status, string detail = "", ProtectionLevel protectionUsed = ProtectionLevel.Unused)
+public class BondResultManualPair(BondStatus status, string detail = "", ProtectionLevel protectionUsed = ProtectionLevel.Unused) : IBondResult
 {
 	public BondStatus Status { get; } = status;
 	public string Detail { get; } = detail;
@@ -131,7 +158,7 @@ public class BondResult(BondStatus status, string detail = "", ProtectionLevel p
 public enum BondStatus
 {
 	/// <summary>
-	/// Result is simply that the device is known to be paired upon task completion. There may or may not be more information in <see cref="BondResult.Detail"/>
+	/// Result is simply that the device is known to be paired upon task completion. There may or may not be more information in <see cref="BondResultManualPair.Detail"/>
 	/// </summary>
 	Paired,
 
@@ -145,7 +172,7 @@ public enum BondStatus
 
 	/// <summary>
 	/// The device is known not to be paired upon task completion. There is no ambiguity the operation failed, it wasn't canceled, timed out, or otherwise, and the reasoning is given.
-	/// Such as the case when bonding is already in progress.  Check <see cref="BondResult.Detail"/> for the Specific failure.
+	/// Such as the case when bonding is already in progress.  Check <see cref="BondResultManualPair.Detail"/> for the Specific failure.
 	/// 
 	/// Android: No further support as the SDK fails to give any other Specific info failures.
 	/// Windows: For brevity, consolidates various Specific failures into a single Xplatform value.

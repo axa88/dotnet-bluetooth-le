@@ -1,7 +1,7 @@
 namespace Plugin.BLE.Abstractions
 {
     /// <summary>
-    /// Bond/pairing state of a device (currently only used on Android),
+    /// Bond/pairing state of a device
     /// see https://developer.android.com/reference/android/bluetooth/BluetoothDevice#getBondState()
     /// </summary>
     public enum DeviceBondState

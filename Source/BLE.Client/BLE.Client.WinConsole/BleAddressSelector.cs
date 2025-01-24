@@ -47,7 +47,6 @@ namespace BLE.Client.WinConsole
             if (bleaddressIn is null || bleaddressIn.Length != 12)
             {
                 Console.WriteLine("Wrong BLE Address entered");
-                throw new Exception("Wrong BLE Address entered");
             }
             bleaddress = bleaddressIn.ToUpperInvariant();
             File.WriteAllText(bleaddressTxtPath, bleaddress);

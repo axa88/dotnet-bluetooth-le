@@ -322,7 +322,7 @@ namespace BLE.Client.ViewModels
                 var list = new List<ManufacturerDataFilter>();
                 foreach (var id in manuIds)
                 {
-                    if (int.TryParse(id, out var manuId))
+                    if (ushort.TryParse(id, out var manuId))
                     {
                         list.Add(new ManufacturerDataFilter(manuId));
                     }
@@ -359,7 +359,8 @@ namespace BLE.Client.ViewModels
                 //update rssi for already connected devices (so tha 0 is not shown in the list)
                 try
                 {
-                    await connectedDevice.UpdateRssiAsync();
+                    //await connectedDevice.UpdateRssiAsync();
+                    await connectedDevice.GetRssi();
                 }
                 catch (Exception ex)
                 {
@@ -426,7 +427,8 @@ namespace BLE.Client.ViewModels
                     {
                         _userDialogs.ShowLoading();
 
-                        await device.Device.UpdateRssiAsync();
+                        //await device.Device.UpdateRssiAsync();
+                        await device.Device.GetRssi();
                         await device.RaisePropertyChanged(nameof(device.Rssi));
 
                         _userDialogs.HideLoading();

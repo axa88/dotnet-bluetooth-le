@@ -4,23 +4,26 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreBluetooth;
+
 using Foundation;
+
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Abstractions.Utils;
+using Plugin.BLE.Shared.Contracts.Rssi;
+
+
 
 namespace Plugin.BLE.iOS
 {
     public class Device : DeviceBase<CBPeripheral>
-    {
+	{
         private readonly IBleCentralManagerDelegate _bleCentralManagerDelegate;
 
         public Device(Adapter adapter, CBPeripheral nativeDevice, IBleCentralManagerDelegate bleCentralManagerDelegate)
-            : this(adapter, nativeDevice, bleCentralManagerDelegate, nativeDevice.Name, nativeDevice.RSSI?.Int32Value ?? 0,
-                new List<AdvertisementRecord>(), true)
-        {
-        }
+            : this(adapter, nativeDevice, bleCentralManagerDelegate, nativeDevice.Name, nativeDevice.RSSI?.Int32Value ?? 0, []) { }
 
+        // ToDo clean up. this overuse of parameters hides intent. cant determine if these parameters are really available and should be set upon creation
         public Device(Adapter adapter, CBPeripheral nativeDevice, IBleCentralManagerDelegate bleCentralManagerDelegate, string name, int rssi, List<AdvertisementRecord> advertisementRecords, bool isConnectable = true)
             : base(adapter, nativeDevice)
         {
@@ -28,9 +31,10 @@ namespace Plugin.BLE.iOS
 
             Id = Guid.ParseExact(NativeDevice.Identifier.AsString(), "d");
             Name = name;
-
-            Rssi = rssi;
-            AdvertisementRecords = advertisementRecords;
+			Rssi = new RssiBase();
+			Rssi.Timestamp = DateTime.Now; // ToDo its being passed in so assume a rssi value is valid on every Device creation
+			Rssi.Value = rssi is < 0 and >= sbyte.MinValue ? (sbyte)rssi : default;
+			AdvertisementRecords = advertisementRecords;
             IsConnectable = isConnectable;
 
             // TODO figure out if this is in any way required,
@@ -113,7 +117,32 @@ namespace Plugin.BLE.iOS
 					token: cancellationToken);
         }
 
-        public override Task<bool> UpdateRssiAsync(CancellationToken cancellationToken)
+		public override Task<IRssi> GetRssi(CancellationToken cancellationToken = default)
+		{
+			return TaskBuilder.FromEvent<IRssi, EventHandler<CBRssiEventArgs>, EventHandler<CBPeripheralErrorEventArgs>>(
+				execute: () => NativeDevice.ReadRSSI(),
+				getCompleteHandler: (complete, reject) => (sender, args) =>
+				{
+					if (args.Error == null)
+						complete(new RssiBase { Timestamp = DateTime.Now, Value = args.Rssi.SByteValue });
+					else
+						reject(new Exception($"Error while reading rssi services {args.Error.LocalizedDescription}"));
+
+					complete(Rssi);
+				},
+				subscribeComplete: handler => NativeDevice.RssiRead += handler,
+				unsubscribeComplete: handler => NativeDevice.RssiRead -= handler,
+				getRejectHandler: reject => (sender, args) =>
+				{
+					if (args.Peripheral.Identifier == NativeDevice.Identifier)
+						reject(new($"Device {Name} disconnected while reading RSSI."));
+				},
+				subscribeReject: handler => _bleCentralManagerDelegate.DisconnectedPeripheral += handler,
+				unsubscribeReject: handler => _bleCentralManagerDelegate.DisconnectedPeripheral -= handler,
+				token: cancellationToken);
+		}
+
+		/*public override Task<bool> UpdateRssiAsync(CancellationToken cancellationToken)
         {
             return TaskBuilder.FromEvent<bool, EventHandler<CBRssiEventArgs>, EventHandler<CBPeripheralErrorEventArgs>>(
                 execute: () => NativeDevice.ReadRSSI(),
@@ -125,7 +154,8 @@ namespace Plugin.BLE.iOS
                     }
                     else
                     {
-                        Rssi = args.Rssi?.Int32Value ?? 0;
+                        Rssi.Timestamp = DateTime.Now;
+						Rssi.Value = args.Rssi.SByteValue;
                         complete(true);
                     }
                 },
@@ -139,31 +169,36 @@ namespace Plugin.BLE.iOS
                 subscribeReject: handler => _bleCentralManagerDelegate.DisconnectedPeripheral += handler,
                 unsubscribeReject: handler => _bleCentralManagerDelegate.DisconnectedPeripheral -= handler,
                 token: cancellationToken);
-        }
+        }*/
 
-        protected override DeviceState GetState()
-        {
-            switch (NativeDevice.State)
-            {
-                case CBPeripheralState.Connected:
-                    return DeviceState.Connected;
-                case CBPeripheralState.Connecting:
-                    return DeviceState.Connecting;
-                case CBPeripheralState.Disconnected:
-                    return DeviceState.Disconnected;
-                case CBPeripheralState.Disconnecting:
-                    return DeviceState.Disconnected;
-                default:
-                    return DeviceState.Disconnected;
-            }
-        }
+		public override DeviceState State => NativeDevice.State switch
+		{
+			CBPeripheralState.Connected => DeviceState.Connected,
+			CBPeripheralState.Connecting => DeviceState.Connecting,
+			CBPeripheralState.Disconnected => DeviceState.Disconnected,
+			CBPeripheralState.Disconnecting => DeviceState.Disconnected,
+			_ => DeviceState.Disconnected,
+		};
+
+		//protected override DeviceState GetState()
+  //      {
+		//	return NativeDevice.State switch
+		//	{
+		//		CBPeripheralState.Connected => DeviceState.Connected,
+		//		CBPeripheralState.Connecting => DeviceState.Connecting,
+		//		CBPeripheralState.Disconnected => DeviceState.Disconnected,
+		//		CBPeripheralState.Disconnecting => DeviceState.Disconnected,
+		//		_ => DeviceState.Disconnected,
+		//	};
+		//}
 
         public void Update(CBPeripheral nativeDevice)
         {
-            Rssi = nativeDevice.RSSI?.Int32Value ?? 0;
-            //It's maybe not the best idea to updated the name based on CBPeripherial name because this might be stale.
-            //Name = nativeDevice.Name; 
-        }
+            Rssi.Timestamp = DateTime.Now;
+			Rssi.Value = nativeDevice?.RSSI?.SByteValue ?? 0;
+			//It's maybe not the best idea to update the name based on CBPeripherial name because this might be stale.
+			//Name = nativeDevice.Name; 
+		}
 
         protected override async Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken)
         {
@@ -177,16 +212,13 @@ namespace Plugin.BLE.iOS
             return false;
         }
         
-        public override bool IsConnectable { get; protected set; }
+        public override bool IsConnectable { get; }
 
         public override bool SupportsIsConnectable { get => true; }
-        
-        protected override DeviceBondState GetBondState()
-        {
-            return DeviceBondState.NotSupported;
-        }
 
-        public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default)
+		//protected override DeviceBondState GetBondState() => DeviceBondState.NotSupported;
+
+		public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default)
         {
             throw new NotImplementedException();
         }
