@@ -101,10 +101,7 @@ internal class BluetoothLeDeviceManager
 					_cacheNegativeEnumerationComplete = true;
 
 				if (_cachePositiveEnumerationComplete && _cacheNegativeEnumerationComplete)
-				{
 					_checkTimer.Change(TimeSpan.Zero, Timeout.InfiniteTimeSpan);
-					Trace.Message($"Device caches ready monitor start, count: {_cachedDevices.Count}");
-				}
 			};
 		}
 	}
@@ -120,7 +117,7 @@ internal class BluetoothLeDeviceManager
 			foreach (var deviceId in devicesToConfirmAsRemoved)
 			{
 				_cachedDevices.TryRemove(deviceId, out var _);
-				DeviceUpdated?.Invoke(this, new BleDeviceRemovedFromCacheEventArgs(deviceId)); Trace.Message($"Removed from cache: {deviceId.ToBleDeviceGuidFromId()} {_cachedDevices.Count} remain");
+				DeviceUpdated?.Invoke(this, new BleDeviceRemovedFromCacheEventArgs(deviceId));
 			}
 		}
 		finally

@@ -2,7 +2,7 @@
 
 using Android.Bluetooth;
 using Plugin.BLE.Abstractions;
-using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.RequestResults;
 
 
 namespace Plugin.BLE.Extensions;
@@ -20,13 +20,13 @@ internal static class DeviceBondStateExtension
 		};
 	}
 
-	internal static BondStatus XPlatformBondStatus(this Bond pairStatus)
+	internal static ResultStatus XPlatformBondStatus(this Bond pairStatus)
 	{
 		return pairStatus switch
 		{
-			Bond.Bonded => BondStatus.Paired,
-			Bond.Bonding => BondStatus.SpecifiedFailure,
-			Bond.None => BondStatus.UnspecifiedFailure,
+			Bond.Bonded => ResultStatus.Success,
+			Bond.Bonding => ResultStatus.SpecifiedFailure,
+			Bond.None => ResultStatus.UnspecifiedFailure,
 			_ => throw new ArgumentOutOfRangeException(nameof(pairStatus), pairStatus, null)
 		};
 	}

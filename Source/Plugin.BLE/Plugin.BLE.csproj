@@ -145,4 +145,44 @@
 	  <None Remove="Shared\Contracts\ITimestamp.cs" />
 	</ItemGroup>
 
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\IResult.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\ResultStatus.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\ConnectionResult.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Shared\Device\" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\IBondState.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\IBondReport.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\IPairProcess.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\IBondRequest.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\BondingOptions.cs" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="Shared\Contracts\Pairing\PairModes.cs" />
+	</ItemGroup>
+
 </Project>

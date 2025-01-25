@@ -16,7 +16,8 @@ using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Utils;
 using Plugin.BLE.Extensions;
 using Plugin.BLE.Shared.Contracts.Pairing;
-
+using Plugin.BLE.Shared.Contracts.Pairing.Adapter;
+using Plugin.BLE.Shared.Contracts.Pairing.Device;
 using Plugin.BLE.Windows;
 
 
@@ -377,10 +378,10 @@ namespace BLE.Client.WinConsole
 
 				try
 				{
-					var iBondResult = await bondRequest.BondAsync(_selectedDevice, new(pairModes, _protectionLevel), cts.Token);
-					Write($"{nameof(iBondResult.Status)}: {iBondResult.Status}, {nameof(iBondResult.Detail)}: {iBondResult.Detail}");
+					var iBondResult = await bondRequest.Bond(_selectedDevice, new(pairModes, _protectionLevel), cts.Token);
+					Write($"{nameof(iBondResult.ResultStatus)}: {iBondResult.ResultStatus}, {nameof(iBondResult.Detail)}: {iBondResult.Detail}");
 					if (iBondResult is BondResultManualPair bondResult)
-						Write($"{nameof(bondResult.Status)}: {bondResult.Status}, {nameof(bondResult.Detail)}: {bondResult.Detail}, {nameof(bondResult.ProtectionUsed)}: {bondResult.ProtectionUsed}");
+						Write($"{nameof(bondResult.ProtectionUsed)}: {bondResult.ProtectionUsed}");
 				}
 				catch (Exception ex)
 				{
@@ -499,7 +500,7 @@ namespace BLE.Client.WinConsole
 			void OnDeviceDiscovered(object? _, DeviceEventArgs a)
 			{
 				var dev = a.Device;
-				Write($"{index++}: DeviceDiscovered: {0} with Name = 1", dev.Id.ToHexBleAddress(), dev.Name);
+				Write($"{index++}: {nameof(OnDeviceDiscovered)}: {dev.Id.ToHexBleAddress()} Name = {dev.Name}");
 				if (!_discoveredDevices.Contains(a.Device))
 					_discoveredDevices.Add(a.Device);
 			}

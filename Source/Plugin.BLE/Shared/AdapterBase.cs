@@ -269,7 +269,7 @@ public abstract class AdapterBase : IAdapter
 			return discoveredDevice;
 		}
 
-		var connectedDevice = await ConnectToKnownDeviceNativeAsync(deviceGuid, connectParameters, cancellationToken);
+		var connectedDevice = await ConnectToKnownDeviceNativeAsync(deviceGuid, connectParameters, cancellationToken); // ToDo fix this , call can throw on android
 		if (!DiscoveredDevicesRegistry.ContainsKey(deviceGuid))
 			DiscoveredDevicesRegistry.TryAdd(deviceGuid, connectedDevice);
 
