@@ -4,34 +4,26 @@ using Android.Content;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Extensions;
 
-namespace Plugin.BLE.BroadcastReceivers
+namespace Plugin.BLE.BroadcastReceivers;
+
+public class BluetoothStatusBroadcastReceiver(Action<BluetoothState> stateChangedHandler) : BroadcastReceiver
 {
-    public class BluetoothStatusBroadcastReceiver : BroadcastReceiver
-    {
-        private readonly Action<BluetoothState> _stateChangedHandler;
+	public override void OnReceive(Context context, Intent intent)
+	{
+		var action = intent.Action;
 
-        public BluetoothStatusBroadcastReceiver(Action<BluetoothState> stateChangedHandler)
-        {
-            _stateChangedHandler = stateChangedHandler;
-        }
+		if (action != BluetoothAdapter.ActionStateChanged)
+			return;
 
-        public override void OnReceive(Context context, Intent intent)
-        {
-            var action = intent.Action;
+		var state = intent.GetIntExtra(BluetoothAdapter.ExtraState, -1);
 
-            if (action != BluetoothAdapter.ActionStateChanged)
-                return;
+		if (state == -1)
+		{
+			stateChangedHandler?.Invoke(BluetoothState.Unknown);
+			return;
+		}
 
-            var state = intent.GetIntExtra(BluetoothAdapter.ExtraState, -1);
-
-            if (state == -1)
-            {
-                _stateChangedHandler?.Invoke(BluetoothState.Unknown);
-                return;
-            }
-
-            var btState = (State)state;
-            _stateChangedHandler?.Invoke(btState.ToBluetoothState());
-        }
-    }
+		var btState = (State)state;
+		stateChangedHandler?.Invoke(btState.ToBluetoothState());
+	}
 }

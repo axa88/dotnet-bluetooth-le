@@ -1,12 +1,8 @@
 ﻿using Android.Bluetooth;
 
-namespace Plugin.BLE.Android.Extensions
+namespace Plugin.BLE.Android.Extensions;
+
+public static class BluetoothDeviceExtension
 {
-    public static class BluetoothDeviceExtension
-    {
-        public static bool SupportsBLE(this BluetoothDevice d)
-        {
-            return d.Type == BluetoothDeviceType.Le || d.Type == BluetoothDeviceType.Dual;
-        }
-    }
+	public static bool SupportsBle(this BluetoothDevice d) => d.Type is BluetoothDeviceType.Le or BluetoothDeviceType.Dual;
 }

@@ -186,10 +186,10 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 			// set the match mode on Android 6 and above
 			ssb.SetMatchMode(ScanMatchMode.ToNative());
 
-			// If set to agressive, reduce the number of adverts needed before raising the DeviceFound callback
+			// If set to aggressive, reduce the number of adverts needed before raising the DeviceFound callback
 			if (ScanMatchMode.ToNative() == BluetoothScanMatchMode.Aggressive)
 			{
-				// Be more agressive when seeking adverts
+				// Be more aggressive when seeking adverts
 				ssb.SetNumOfMatches((int)BluetoothScanMatchNumber.OneAdvertisement);
 				Trace.Message("Using ScanMatchMode Aggressive");
 			}
@@ -258,7 +258,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 		var nativeDevice = _bluetoothAdapter.GetRemoteDevice(macBytes);
 		if (nativeDevice == null)
 			throw new Abstractions.Exceptions.DeviceConnectionException(deviceGuid,"", $"[Adapter] Device {deviceGuid} not found.");
-		if (!nativeDevice.SupportsBLE())
+		if (!nativeDevice.SupportsBle())
 			throw new Abstractions.Exceptions.DeviceConnectionException(deviceGuid,"", $"[Adapter] Device {deviceGuid} does not support BLE.");
 		var device = new Device(this, nativeDevice, null);
 
@@ -272,8 +272,8 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 			Trace.Message("Caution: GetSystemConnectedDevices does not take into account the 'services' parameter on Android.");
 
 		//add dualMode type also as they are BLE as well)
-		var connectedDevices = (_bluetoothManager.GetConnectedDevices(ProfileType.Gatt) ?? new List<BluetoothDevice>()).Where(d => d.SupportsBLE());
-		var bondedDevices = (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(d => d.SupportsBLE());
+		var connectedDevices = (_bluetoothManager.GetConnectedDevices(ProfileType.Gatt) ?? new List<BluetoothDevice>()).Where(d => d.SupportsBle());
+		var bondedDevices = (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(d => d.SupportsBle());
 		return connectedDevices.Union(bondedDevices, new DeviceComparer()).Select(d => new Device(this, d, null)).Cast<IDevice>().ToList();
 	}
 
@@ -315,7 +315,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 
 	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
 
-	public IReadOnlyList<IDevice> BondedDevices => (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(static d => d.SupportsBLE()).Select(d => new Device(this, d, null)).Cast<IDevice>().ToList();
+	public IReadOnlyList<IDevice> BondedDevices => (_bluetoothAdapter.BondedDevices ?? new List<BluetoothDevice>()).Where(static d => d.SupportsBle()).Select(d => new Device(this, d, null)).Cast<IDevice>().ToList();
 
 	#endregion
 

@@ -130,10 +130,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Compile Include="Windows\SafeCreateDictionary.cs" />
-	</ItemGroup>
-
-	<ItemGroup>
 	  <None Remove="Shared\Contracts\IRssi.cs" />
 	</ItemGroup>
 
