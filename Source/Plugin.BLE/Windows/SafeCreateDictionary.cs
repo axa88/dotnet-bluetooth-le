@@ -4,14 +4,12 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Plugin.BLE.Abstractions;
-
 
 namespace Plugin.BLE.Windows;
 
 /// <summary>
-/// Hopefully thread safe Dictionary mimicking the Concurrent API without the need or complexity of concurrency.
-/// Value access and creation is quick but unlike ConcurrentDictionary, creation may need to be async and locked.
+/// Thread safe Dictionary mimicking the Concurrent API without the need or complexity of concurrency.
+/// Value creation unlike ConcurrentDictionary is async and should be locked.
 /// </summary>
 /// <typeparam name="TKey"></typeparam>
 /// <typeparam name="TValue"></typeparam>
@@ -36,13 +34,13 @@ public class SafeCreateDictionary<TKey, TValue>
 		finally { _semaphore.Release(); }
 	}
 
-	// This method remains async cuz the updater contains an async method to verify the underlying device.
-	// Right now a device can be Added to the Master collection either by OS through the BluetoothLeDevice Manager which likely always has a valid underlying device
-	// but also on discovery which may or may not, or by user Devices that had been purged alrady
+	// This method remains async cuz the updater contains an async method to verify availability of the underlying device.
+	// A device can be Added to the Master collection either by the BluetoothLeDevice Manager from the OS unsolicited,
+	// generated upon device discovery or recreated by the user application where it holds a reference to the IDevice but the underlying device had already been purged by the OS.
 	public async Task<TValue> AddOrUpdate(TKey key, Func<TValue> valueCreator, Func<TValue, Task<TValue>> valueUpdater)
 	{
-		await _semaphore.WaitAsync();
-		try { return _dictionary.TryGetValue(key, out TValue value) ? _dictionary[key] = await valueUpdater(value) : _dictionary[key] = valueCreator.Invoke(); }
+		await _semaphore.WaitAsync().ConfigureAwait(false);
+		try { return _dictionary.TryGetValue(key, out TValue value) ? _dictionary[key] = await valueUpdater(value).ConfigureAwait(false) : _dictionary[key] = valueCreator.Invoke(); }
 		finally { _semaphore.Release(); }
 	}
 

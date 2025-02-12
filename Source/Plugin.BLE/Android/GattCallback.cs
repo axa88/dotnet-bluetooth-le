@@ -1,268 +1,273 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
+
 using Android.Bluetooth;
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Extensions;
 using Plugin.BLE.Android.CallbackEventArgs;
 
-namespace Plugin.BLE.Android
+
+namespace Plugin.BLE.Android;
+
+public interface IGattCallback
 {
-    public interface IGattCallback
-    {
-        event EventHandler<ServicesDiscoveredCallbackEventArgs> ServicesDiscovered;
-        event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueRead;
-        event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueUpdated;
-        event EventHandler<CharacteristicWriteCallbackEventArgs> CharacteristicValueWritten;
-        event EventHandler<DescriptorCallbackEventArgs> DescriptorValueWritten;
-        event EventHandler<DescriptorCallbackEventArgs> DescriptorValueRead;
-        event EventHandler<RssiReadCallbackEventArgs> RemoteRssiRead;
-        event EventHandler ConnectionInterrupted;
-        event EventHandler<MtuRequestCallbackEventArgs> MtuRequested;
-    }
+	event EventHandler<MtuRequestCallbackEventArgs> MtuRequested;
+	event EventHandler<RssiReadCallbackEventArgs> RemoteRssiRead;
+	event EventHandler<ServicesDiscoveredCallbackEventArgs> ServicesDiscovered;
+	event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueRead;
+	event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueUpdated;
+	event EventHandler<CharacteristicWriteCallbackEventArgs> CharacteristicValueWritten;
+	event EventHandler<DescriptorCallbackEventArgs> DescriptorValueWritten;
+	event EventHandler<DescriptorCallbackEventArgs> DescriptorValueRead;
+	event EventHandler ConnectionInterrupted;
+}
 
-    public class GattCallback : BluetoothGattCallback, IGattCallback
-    {
-        private readonly Adapter _adapter;
-        private readonly Device _device;
-        public event EventHandler<ServicesDiscoveredCallbackEventArgs> ServicesDiscovered;
-        public event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueRead;
-        public event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueUpdated;
-        public event EventHandler<CharacteristicWriteCallbackEventArgs> CharacteristicValueWritten;
-        public event EventHandler<RssiReadCallbackEventArgs> RemoteRssiRead;
-        public event EventHandler ConnectionInterrupted;
-        public event EventHandler<DescriptorCallbackEventArgs> DescriptorValueWritten;
-        public event EventHandler<DescriptorCallbackEventArgs> DescriptorValueRead;
-        public event EventHandler<MtuRequestCallbackEventArgs> MtuRequested;
+public class GattCallback(Adapter adapter, Device device) : BluetoothGattCallback, IGattCallback
+{
+	public event EventHandler<MtuRequestCallbackEventArgs> MtuRequested;
+	public event EventHandler<RssiReadCallbackEventArgs> RemoteRssiRead;
+	public event EventHandler<ServicesDiscoveredCallbackEventArgs> ServicesDiscovered;
+	public event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueRead;
+	public event EventHandler<CharacteristicReadCallbackEventArgs> CharacteristicValueUpdated;
+	public event EventHandler<CharacteristicWriteCallbackEventArgs> CharacteristicValueWritten;
+	public event EventHandler<DescriptorCallbackEventArgs> DescriptorValueWritten;
+	public event EventHandler<DescriptorCallbackEventArgs> DescriptorValueRead;
+	public event EventHandler ConnectionInterrupted;
 
-        public GattCallback(Adapter adapter, Device device)
-        {
-            _adapter = adapter;
-            _device = device;
-        }
+	public override void OnConnectionStateChange(BluetoothGatt gatt, GattStatus status, ProfileState newState)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
+		base.OnConnectionStateChange(gatt, status, newState);
 
-        public override void OnConnectionStateChange(BluetoothGatt gatt, GattStatus status, ProfileState newState)
-        {
-            base.OnConnectionStateChange(gatt, status, newState);
+		switch (newState)
+		{
+			case ProfileState.Disconnected:
 
-            if (!gatt.Device.Address.Equals(_device.NativeDevice.Address))
-            {
-                Trace.Message($"Gatt callback for device {_device.NativeDevice.Address} was called for device with address {gatt.Device.Address}. This shoud not happen. Please log an issue.");
-                return;
-            }
+				// Close GATT if autoConnect is disabled, else we can accumulate zombie gatts.
+				if (!device.ConnectParameters.AutoConnect)
+					CloseGattInstances(gatt);
 
-            //ToDo ignore just for me
-            Trace.Message($"References of parent device and gatt callback device equal? {ReferenceEquals(_device.NativeDevice, gatt.Device).ToString().ToUpper()}");
+				// If status == 19, then connection was closed by the peripheral device (clean disconnect), consider this as a DeviceDisconnected
+				if (device.IsOperationRequested || (int)status == 19)
+				{
+					Trace.Message("Disconnected by user");
 
-            Trace.Message($"OnConnectionStateChange: GattStatus: {status}");
+					//Found so we can remove it
+					device.IsOperationRequested = false;
+					adapter.ConnectedDeviceRegistry.TryRemove(gatt.Device.Address, out _);
 
-            switch (newState)
-            {
-                // disconnected
-                case ProfileState.Disconnected:
+					if (status != GattStatus.Success && (int)status != 19)
+					{
+						// The above error event handles the case where the error happened during a Connect call, which will close out any waiting asyncs.
+						// Android > 5.0 uses this switch branch when an error occurs during connect
+						Trace.Message($"Error while connecting '{device.Name}'. Not raising disconnect event.");
+						adapter.HandleConnectionFail(device, $"GattCallback error: {status}");
+					}
+					else
+					{
+						//we already handled device error so no need th raise disconnect event(happens when device not in range)
+						adapter.HandleDisconnectedDevice(true, device);
+					}
+				}
+				else
+				{
+					//connection must have been lost, because the callback was not triggered by calling disconnect
+					Trace.Message($"Disconnected '{device.Name}' by lost connection");
 
-                    // Close GATT if autoConnect is disabled, else we can accumulate zombie gatts.
-                    if (!_device.ConnectParameters.AutoConnect)
-                    {
-                        CloseGattInstances(gatt);
-                    }
+					adapter.ConnectedDeviceRegistry.TryRemove(gatt.Device.Address, out _);
+					adapter.HandleDisconnectedDevice(false, device);
 
-                    // If status == 19, then connection was closed by the peripheral device (clean disconnect), consider this as a DeviceDisconnected
-                    if (_device.IsOperationRequested || (int)status == 19)
-                    {
-                        Trace.Message("Disconnected by user");
+				}
+				// inform pending tasks
+				ConnectionInterrupted?.Invoke(this, EventArgs.Empty);
+				break;
+			case ProfileState.Connecting:
+				Trace.Message("Connecting");
+				break;
+			case ProfileState.Connected:
+				Trace.Message("Connected");
 
-                        //Found so we can remove it
-                        _device.IsOperationRequested = false;
-                        _adapter.ConnectedDeviceRegistry.TryRemove(gatt.Device.Address, out _);
+				//Check if the operation was requested by the user
+				if (device.IsOperationRequested)
+				{
+					device.Update(gatt.Device, gatt);
 
-                        if (status != GattStatus.Success && (int)status != 19)
-                        {
-                            // The above error event handles the case where the error happened during a Connect call, which will close out any waiting asyncs.
-                            // Android > 5.0 uses this switch branch when an error occurs during connect
-                            Trace.Message($"Error while connecting '{_device.Name}'. Not raising disconnect event.");
-                            _adapter.HandleConnectionFail(_device, $"GattCallback error: {status}");
-                        }
-                        else
-                        {
-                            //we already hadled device error so no need th raise disconnect event(happens when device not in range)
-                            _adapter.HandleDisconnectedDevice(true, _device);
-                        }
-                    }
-                    else
-                    {
-                        //connection must have been lost, because the callback was not triggered by calling disconnect
-                        Trace.Message($"Disconnected '{_device.Name}' by lost connection");
+					//Found so we can remove it
+					device.IsOperationRequested = false;
+				}
+				else
+				{
+					//ToDo explore this
+					//only for on auto-reconnect (device is not in operation registry)
+					device.Update(gatt.Device, gatt);
+				}
 
-                        _adapter.ConnectedDeviceRegistry.TryRemove(gatt.Device.Address, out _);
-                        _adapter.HandleDisconnectedDevice(false, _device);
+				if (status != GattStatus.Success)
+				{
+					// The above error event handles the case where the error happened during a Connect call, which will close out any waiting asyncs.
+					// Android <= 4.4 uses this switch branch when an error occurs during connect
+					Trace.Message($"Error while connecting '{device.Name}'. GattStatus: {status}. ");
+					adapter.HandleConnectionFail(device, $"GattCallback error: {status}");
 
-                    }
-                    // inform pending tasks
-                    ConnectionInterrupted?.Invoke(this, EventArgs.Empty);
-                    break;
-                // connecting
-                case ProfileState.Connecting:
-                    Trace.Message("Connecting");
-                    break;
-                // connected
-                case ProfileState.Connected:
-                    Trace.Message("Connected");
+					CloseGattInstances(gatt);
+				}
+				else
+				{
+					adapter.ConnectedDeviceRegistry[gatt.Device.Address] = device;
+					adapter.HandleConnectedDevice(device);
+				}
 
-                    //Check if the operation was requested by the user
-                    if (_device.IsOperationRequested)
-                    {
-                        _device.Update(gatt.Device, gatt);
+				break;
+			case ProfileState.Disconnecting:
+				Trace.Message("Disconnecting");
+				break;
+		}
+	}
 
-                        //Found so we can remove it
-                        _device.IsOperationRequested = false;
-                    }
-                    else
-                    {
-                        //ToDo explore this
-                        //only for on auto-reconnect (device is not in operation registry)
-                        _device.Update(gatt.Device, gatt);
-                    }
+	public override void OnMtuChanged(BluetoothGatt gatt, int mtu, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-                    if (status != GattStatus.Success)
-                    {
-                        // The above error event handles the case where the error happened during a Connect call, which will close out any waiting asyncs.
-                        // Android <= 4.4 uses this switch branch when an error occurs during connect
-                        Trace.Message($"Error while connecting '{_device.Name}'. GattStatus: {status}. ");
-                        _adapter.HandleConnectionFail(_device, $"GattCallback error: {status}");
+		Trace.Message($"{nameof(mtu)}: {mtu}");
+		base.OnMtuChanged(gatt, mtu, status);
 
-                        CloseGattInstances(gatt);
-                    }
-                    else
-                    {
-                        _adapter.ConnectedDeviceRegistry[gatt.Device.Address] = _device;
-                        _adapter.HandleConnectedDevice(_device);
-                    }
+		MtuRequested?.Invoke(this, new(GetExceptionFromGattStatus(status), mtu));
+	}
 
-                    break;
-                // disconnecting
-                case ProfileState.Disconnecting:
-                    Trace.Message("Disconnecting");
-                    break;
-            }
-        }
+	public override void OnReadRemoteRssi(BluetoothGatt gatt, int rssi, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        private void CloseGattInstances(BluetoothGatt gatt)
-        {
-            //ToDO just for me
-            Trace.Message($"References of parent device gatt and callback gatt equal? {ReferenceEquals(_device.Gatt, gatt).ToString().ToUpper()}");
+		Trace.Message($"{nameof(rssi)}: {rssi}");
+		base.OnReadRemoteRssi(gatt, rssi, status);
 
-            if (!ReferenceEquals(gatt, _device.Gatt))
-            {
-                gatt.Close();
-            }
+		RemoteRssiRead?.Invoke(this, new(GetExceptionFromGattStatus(status), rssi));
+	}
 
-            //cleanup everything else
-            _device.CloseGatt();
-        }
+	public override void OnServicesDiscovered(BluetoothGatt gatt, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnServicesDiscovered(BluetoothGatt gatt, GattStatus status)
-        {
-            base.OnServicesDiscovered(gatt, status);
+		base.OnServicesDiscovered(gatt, status);
 
-            Trace.Message("OnServicesDiscovered: {0}", status.ToString());
+		ServicesDiscovered?.Invoke(this, new());
+	}
 
-            ServicesDiscovered?.Invoke(this, new ServicesDiscoveredCallbackEventArgs());
-        }
+	public override void OnCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, GattStatus status)
-        {
-            base.OnCharacteristicRead(gatt, characteristic, status);
+		Trace.Message($"raw value: {characteristic.GetValue().ToHexString()}");
+		base.OnCharacteristicRead(gatt, characteristic, status);
 
-            Trace.Message("OnCharacteristicRead: value {0}; status {1}", characteristic.GetValue().ToHexString(), status);
+		CharacteristicValueRead?.Invoke(this, new(characteristic, status));
+	}
 
-            CharacteristicValueRead?.Invoke(this, new CharacteristicReadCallbackEventArgs(characteristic, status));
-        }
+	public override void OnCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic)
+	{
+		if (!ParametersVerified(gatt))
+			return;
 
-        public override void OnCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic)
-        {
-            base.OnCharacteristicChanged(gatt, characteristic);
+		Trace.Message($"raw value: {characteristic.GetValue().ToHexString()}");
+		base.OnCharacteristicChanged(gatt, characteristic);
 
-            Trace.Message("OnCharacteristicChanged: value {0}", characteristic.GetValue().ToHexString());
+		CharacteristicValueUpdated?.Invoke(this, new(characteristic, GattStatus.Success));
+	}
 
-            CharacteristicValueUpdated?.Invoke(this, new CharacteristicReadCallbackEventArgs(characteristic, GattStatus.Success));
-        }
+	public override void OnCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, GattStatus status)
-        {
-            base.OnCharacteristicWrite(gatt, characteristic, status);
+		Trace.Message($"raw value: {characteristic.GetValue().ToHexString()}");
+		base.OnCharacteristicWrite(gatt, characteristic, status);
 
-            Trace.Message("OnCharacteristicWrite: value {0} status {1}", characteristic.GetValue().ToHexString(), status);
+		CharacteristicValueWritten?.Invoke(this, new(characteristic, status, GetExceptionFromGattStatus(status)));
+	}
 
-            CharacteristicValueWritten?.Invoke(this, new CharacteristicWriteCallbackEventArgs(characteristic, status, GetExceptionFromGattStatus(status)));
-        }
+	public override void OnReliableWriteCompleted(BluetoothGatt gatt, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnReliableWriteCompleted(BluetoothGatt gatt, GattStatus status)
-        {
-            base.OnReliableWriteCompleted(gatt, status);
+		base.OnReliableWriteCompleted(gatt, status);
+	}
 
-            Trace.Message("OnReliableWriteCompleted: {0}", status);
-        }
+	public override void OnDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnMtuChanged(BluetoothGatt gatt, int mtu, GattStatus status)
-        {
-            base.OnMtuChanged(gatt, mtu, status);
+		Trace.Message($"raw value: {descriptor.GetValue()?.ToHexString()}");
+		base.OnDescriptorWrite(gatt, descriptor, status);
 
-            Trace.Message("OnMtuChanged to value: {0}", mtu);
+		DescriptorValueWritten?.Invoke(this, new(descriptor, GetExceptionFromGattStatus(status)));
+	}
 
-            MtuRequested?.Invoke(this, new MtuRequestCallbackEventArgs(GetExceptionFromGattStatus(status), mtu));
-        }
+	public override void OnDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, GattStatus status)
+	{
+		if (!ParametersVerified(gatt, status))
+			return;
 
-        public override void OnReadRemoteRssi(BluetoothGatt gatt, int rssi, GattStatus status)
-        {
-            base.OnReadRemoteRssi(gatt, rssi, status);
+		Trace.Message($"raw value: {descriptor.GetValue()?.ToHexString()}");
+		base.OnDescriptorRead(gatt, descriptor, status);
 
-            Trace.Message("OnReadRemoteRssi: device {0} status {1} value {2}", gatt.Device.Name, status, rssi);
+		DescriptorValueRead?.Invoke(this, new(descriptor, GetExceptionFromGattStatus(status)));
+	}
 
-            RemoteRssiRead?.Invoke(this, new RssiReadCallbackEventArgs(GetExceptionFromGattStatus(status), rssi));
-        }
+	private void CloseGattInstances(BluetoothGatt gatt)
+	{
+		if (!ReferenceEquals(gatt, device.Gatt))
+			gatt.Close();
 
-        public override void OnDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, GattStatus status)
-        {
-            base.OnDescriptorWrite(gatt, descriptor, status);
+		device.CloseGatt();
+	}
 
-            Trace.Message("OnDescriptorWrite: {0}", descriptor.GetValue()?.ToHexString());
+	/// <summary>
+	/// Not sure why only ConnectionStateChange was checking the parameters originally, but if necessary why don't all overridden callbacks should check it as well.
+	/// Likely left over experimental unaware code
+	/// </summary>
+	private bool ParametersVerified(BluetoothGatt gatt, GattStatus? status = null, [CallerMemberName] string caller = nameof(BluetoothGattCallback))
+	{
+		Trace.Message($"{caller} {(status != null ? $"{nameof(GattStatus)}: {status}" : string.Empty)}");
 
-            DescriptorValueWritten?.Invoke(this, new DescriptorCallbackEventArgs(descriptor, GetExceptionFromGattStatus(status)));
-        }
+		if (gatt?.Device?.Address == null)
+		{
+			Trace.Message($"{caller} called with null parameters");
+			return false;
+		}
 
-        public override void OnDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, GattStatus status)
-        {
-            base.OnDescriptorRead(gatt, descriptor, status);
+		if (!gatt.Device.Address.Equals(device.NativeDevice.Address))
+		{
+			Trace.Message($"{caller} called for device {gatt.Device.Address} having an unmatched underlying device address {device.NativeDevice.Address}");
+			return false;
+		}
 
-            Trace.Message("OnDescriptorRead: {0}", descriptor.GetValue()?.ToHexString());
+		Trace.Message(gatt.Device.Address);
+		return true;
+	}
 
-            DescriptorValueRead?.Invoke(this, new DescriptorCallbackEventArgs(descriptor, GetExceptionFromGattStatus(status)));
-        }
-
-        private Exception GetExceptionFromGattStatus(GattStatus status)
-        {
-            Exception exception = null;
-            switch (status)
-            {
-                case GattStatus.Failure:
-                case GattStatus.InsufficientAuthentication:
-                case GattStatus.InsufficientEncryption:
-                case GattStatus.InvalidAttributeLength:
-                case GattStatus.InvalidOffset:
-                case GattStatus.ReadNotPermitted:
-                case GattStatus.RequestNotSupported:
-                case GattStatus.WriteNotPermitted:
-                    exception = new Exception($"GattStatus: {(int)status} - {status.ToString()}");
-                    break;
-                case GattStatus.Success:
-                    break;
-                // default path to handle errors that are non standard BLE ones, but device priprietary ones.
-                default:
-                    exception = new Exception($"GattStatus: {(int)status}");
-                    break;
-
-            }
-
-            return exception;
-        }
-    }
+	private static Exception GetExceptionFromGattStatus(GattStatus status)
+	{
+		return status switch
+		{
+			GattStatus.Failure
+			or GattStatus.InsufficientAuthentication
+			or GattStatus.InsufficientEncryption
+			or GattStatus.InvalidAttributeLength
+			or GattStatus.InvalidOffset
+			or GattStatus.ReadNotPermitted
+			or GattStatus.RequestNotSupported
+			or GattStatus.WriteNotPermitted
+			or GattStatus.ConnectionCongested
+			or GattStatus.InsufficientAuthorization => new($"GattStatus: {(int)status} - {status}"),
+			GattStatus.Success => null,
+			_ => new($"GattStatus: {(int)status}")
+		};
+	}
 }

@@ -1,17 +1,9 @@
 using Android.Bluetooth;
 using Plugin.BLE.Abstractions;
 
-namespace Plugin.BLE.Extensions
+namespace Plugin.BLE.Extensions;
+
+internal static class GattWriteTypeExtension
 {
-    internal static class GattWriteTypeExtension
-    {
-        public static CharacteristicWriteType ToCharacteristicWriteType(this GattWriteType writeType)
-        {
-            if (writeType.HasFlag(GattWriteType.NoResponse))
-            {
-                return CharacteristicWriteType.WithoutResponse;
-            }
-            return CharacteristicWriteType.WithResponse;
-        }
-    }
+	public static CharacteristicWriteType ToCharacteristicWriteType(this GattWriteType writeType) => writeType.HasFlag(GattWriteType.NoResponse) ? CharacteristicWriteType.WithoutResponse : CharacteristicWriteType.WithResponse;
 }

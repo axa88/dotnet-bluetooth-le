@@ -12,6 +12,7 @@ using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Extensions;
 using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Pairing.Device;
 using Plugin.BLE.Shared.Contracts.Rssi;
 
 
@@ -35,12 +36,7 @@ public class Device : DeviceBase<BluetoothLEDevice>, IBondState
 			CanPair = NativeDevice.DeviceInformation.Pairing.CanPair;
 
 			NativeDevice.ConnectionStatusChanged += OnConnectionStatusChanged;
-
-			Trace.Message($"{nameof(NativeDevice.BluetoothDeviceId.Id)}: {NativeDevice.BluetoothDeviceId.Id}");
-			Trace.Message($"{nameof(NativeDevice.DeviceId)}: {NativeDevice.DeviceId}");
 		}
-
-		Trace.Message($"Constructed: native : {(NativeDevice == null ? "nul" : "object")}");
 	}
 
 	~Device() => DisposeGattSession();

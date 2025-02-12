@@ -7,8 +7,11 @@ using System.Threading.Tasks;
 
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
+
 using Plugin.BLE.Extensions;
 using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Pairing.Adapter;
+using Plugin.BLE.Shared.Contracts.RequestResults;
 
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
@@ -41,11 +44,8 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 			switch (bleDeviceManagerEventArgs)
 			{
 				case BleDeviceRemovedFromCacheEventArgs:
-					if (MasterDevices.TryGetValue(id, out var removedDevice) && !removedDevice.IsBonded && !removedDevice.IsConnected) // :( a removed device is likely never Bonded or Connected
-					{
+					if (MasterDevices.TryGetValue(id, out var removedDevice) && !removedDevice.IsBonded && !removedDevice.IsConnected) // :( a removed device is likely not Bonded or Connected
 						MasterDevices.TryRemove(id, out var validRemovedDevice);
-						Trace.Message($"Device removed from cache: {validRemovedDevice.Id} {validRemovedDevice.Name} {validRemovedDevice.BondState} {validRemovedDevice.State}");
-					}
 					break;
 				case BleDeviceConnectedEventArgs bleDeviceConnectedEventArgs:
 					var connectedDevice = await MasterDevices.AddOrUpdate(id, valueCreator: () => new(this, id, bleDeviceConnectedEventArgs.DeviceInformation.Name, true),
@@ -95,7 +95,6 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 							updatedDevice.Name = name;
 					}
 					break;
-				default: throw new ArgumentOutOfRangeException(nameof(bleDeviceManagerEventArgs));
 			}
 		};
 	}
@@ -225,7 +224,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 
 	#endregion Connection Bonding
 
-	#region Implementation of IBondReportable
+	#region Implementation of IBondReport
 
 	public event EventHandler<DeviceBondStateChangedEventArgs> DeviceBondStateChanged;
 
@@ -235,14 +234,14 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 
 	#region Implementation of IBondRequest
 
-	public async Task<IBondResult> BondAsync(IDevice device, BondingOptions options, CancellationToken cancellationToken)
+	public async Task<IResult> Bond(IDevice device, BondingOptions options, CancellationToken cancellationToken)
 	{
 		// ToDo: should these return a failed result instead?
 		if (device == null)
-			throw new ArgumentNullException(nameof(device), "Invalid Device");
+			throw new ArgumentNullException(nameof(device));
 
 		if (!device.IsConnectable)
-			return new BondResultManualPair(BondStatus.SpecifiedFailure, "Non connectable devices cannot bond");
+			return new BondResult(ResultStatus.SpecifiedFailure, "Non connectable devices cannot bond");
 
 		// at this point it's a once paired or connected device, there should be a device id // ToDo Remove if a non issue
 		var deviceId = ((Device)device).DeviceId ??= ((Device)device).NativeDevice?.DeviceId;
@@ -257,13 +256,13 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 			if (deviceInformation.Pairing.IsPaired)
 			{
 				const DevicePairingResultStatus status = DevicePairingResultStatus.AlreadyPaired;
-				return new BondResultManualPair(status.XPlatformPairStatus(), $"{status}");
+				return new BondResultManualPair(status.XPlatformPairStatus(), $"{status}", deviceInformation.Pairing.ProtectionLevel.XPlatformProtectionLevel());
 			}
 
 			if (!deviceInformation.Pairing.CanPair)
 			{
 				const DevicePairingResultStatus status = DevicePairingResultStatus.NotReadyToPair;
-				return new BondResultManualPair(status.XPlatformPairStatus(), $"{status}");
+				return new BondResultManualPair(status.XPlatformPairStatus(), $"{status}", deviceInformation.Pairing.ProtectionLevel.XPlatformProtectionLevel());
 			}
 
 			cancellationToken.ThrowIfCancellationRequested(); // check for cancel after allowing it to use the awaited to exit gracefully, but before subsequent awaited code

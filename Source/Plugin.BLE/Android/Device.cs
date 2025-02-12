@@ -17,7 +17,7 @@ using Plugin.BLE.Abstractions.Extensions;
 using Plugin.BLE.Abstractions.Utils;
 using Plugin.BLE.Android.CallbackEventArgs;
 using Plugin.BLE.Extensions;
-using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Pairing.Device;
 using Plugin.BLE.Shared.Contracts.Rssi;
 
 using Trace = Plugin.BLE.Abstractions.Trace;
