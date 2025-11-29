@@ -93,12 +93,6 @@ namespace BLE.Client.WinConsole
 				return;
 			}
 
-			if (_selectedDevice.State is DeviceState.Connected or DeviceState.Connecting)
-			{
-				Write($"Device State: {_selectedDevice.State}. Request requires the Selected to be Disconnected");
-				return;
-			}
-
 			var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 			try
 			{

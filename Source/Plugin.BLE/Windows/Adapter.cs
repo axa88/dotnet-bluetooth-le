@@ -5,27 +5,28 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Plugin.BLE.Abstractions;
-using Plugin.BLE.Abstractions.Contracts;
-
-using Plugin.BLE.Extensions;
-using Plugin.BLE.Shared.Contracts.Pairing;
-using Plugin.BLE.Shared.Contracts.Pairing.Adapter;
-using Plugin.BLE.Shared.Contracts.RequestResults;
-
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
 using Windows.Storage.Streams;
 
+using Plugin.BLE.Abstractions;
+using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Abstractions.EventArgs;
+using Plugin.BLE.Extensions;
+using Plugin.BLE.Shared.Contracts.Connection;
+using Plugin.BLE.Shared.Contracts.Connection.Adapter;
+using Plugin.BLE.Shared.Contracts.Connection.Device;
+using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Pairing.Adapter;
+using Plugin.BLE.Shared.Contracts.RequestResults;
 
 using static Plugin.BLE.Windows.BluetoothLeDeviceManager;
 
 
 namespace Plugin.BLE.Windows;
 
-public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
+public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess, IConnectReport, IConnectRequest
 {
 	private readonly BluetoothAdapter _adapter;
 	private BluetoothLEAdvertisementWatcher _bluetoothLeAdvertisementWatcher;
@@ -58,13 +59,15 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 							return existing;
 						}
 					);
-					HandleConnectedDevice(connectedDevice);
+					DeviceConnectionStateChanged?.Invoke(this, new(connectedDevice));
+					//HandleConnectedDevice(connectedDevice); // ToDo eliminate
 					break;
 				case BleDeviceDisconnectedEventArgs:
 					if (MasterDevices.TryGetValue(id, out var disconnectedDevice))
 					{
 						disconnectedDevice.IsConnected = false;
-						HandleDisconnectedDevice(true, disconnectedDevice); // ToDo deal with disconnect request vs loss later
+						DeviceConnectionStateChanged?.Invoke(this, new(disconnectedDevice)); // ToDo deal with lost connections later
+						//HandleDisconnectedDevice(true, disconnectedDevice); // ToDo eliminate
 					}
 					break;
 				case BleDevicePairedEventArgs bleDevicePairedEventArgs:
@@ -187,8 +190,6 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 
 	#region Connection
 
-	public override IReadOnlyList<IDevice> ConnectedDevices => MasterDevices.Values.Where(static device => device.IsConnected).ToList();
-
 	protected override async Task ConnectToDeviceNativeAsync(IDevice device, ConnectParameters connectParameters, CancellationToken cancellationToken) => await ((Device)device).ConnectInternal(connectParameters, cancellationToken);
 
 	protected override async Task<IDevice> ConnectToKnownDeviceNativeAsync(Guid deviceGuid, ConnectParameters connectParameters, CancellationToken cancellationToken) // ReSharper restore OptionalParameterHierarchyMismatch
@@ -214,7 +215,35 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 		((Device)device).DisconnectInternal();
 	}
 
+	public virtual async Task<IResult> ConnectToDeviceAsyncX(IDevice device, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(device);
+
+		if (device.State == DeviceState.Connected)
+			return new ConnectionResult(ResultStatus.SpecifiedFailure, "Device already Connected", device);
+
+		return await ((IConnectProcess)device).ConnectInternalX(connectParameters, cancellationToken).ConfigureAwait(false);
+	}
+
 	#endregion Connection
+
+	#region Implementation of IConnectReport
+
+	public event EventHandler<DeviceConnectionChangedEventArgs> DeviceConnectionStateChanged;
+
+	IReadOnlyList<IDevice> IConnectReport.ConnectedDevices => MasterDevices.Values.Where(static device => device.IsConnected).ToList();
+
+	#endregion
+
+	#region Implementation of IConnectRequest
+
+	public Task<IResult> ConnectToDevice(IDevice device, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+	public Task<IResult> ConnectToDeviceById(Guid id, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+	public Task<IResult> DisconnectDevice(IDevice device, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+
+	#endregion
 
 	#region Connection Bonding
 
@@ -237,8 +266,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 	public async Task<IResult> Bond(IDevice device, BondingOptions options, CancellationToken cancellationToken)
 	{
 		// ToDo: should these return a failed result instead?
-		if (device == null)
-			throw new ArgumentNullException(nameof(device));
+		ArgumentNullException.ThrowIfNull(device);
 
 		if (!device.IsConnectable)
 			return new BondResult(ResultStatus.SpecifiedFailure, "Non connectable devices cannot bond");
@@ -325,9 +353,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 					break;
 				case PairModes.ProvidePasswordCredential when response is IPairProcess.CredentialsPairResponse credentialsResponse:
 					if (!string.IsNullOrWhiteSpace(credentialsResponse.UserName) && !string.IsNullOrWhiteSpace(credentialsResponse.Password))
-					#pragma warning disable CA1416
 						args.AcceptWithPasswordCredential(new(credentialsResponse.Resource, credentialsResponse.UserName, credentialsResponse.Password));
-					#pragma warning restore CA1416
 					else
 						Trace.Message($"Accepting the {negotiatedPairingMode} mode requires a User Name:<{credentialsResponse.UserName}> and Password: <{credentialsResponse.Password}>");
 					break;
@@ -345,4 +371,5 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest, IPairProcess
 	public event EventHandler<IPairProcess.PairRespondedEventArgs> PairResponded;
 
 	#endregion
+
 }

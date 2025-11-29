@@ -13,17 +13,9 @@ internal static class ScanModeExtension
 {
 	public static AndroidScanMode ToNative(this ScanMode scanMode)
 	{
-		if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop)
-			throw new InvalidOperationException("Scan modes are not implemented in API lvl < 21.");
-
 		switch (scanMode)
 		{
 			case ScanMode.Passive:
-				if (Build.VERSION.SdkInt < BuildVersionCodes.M)
-				{
-					Trace.Message("Scanmode Passive is not supported on API lvl < 23. Falling back to LowPower.");
-					return AndroidScanMode.LowPower;
-				}
 				return AndroidScanMode.Opportunistic;
 			case ScanMode.LowPower:
 				return AndroidScanMode.LowPower;

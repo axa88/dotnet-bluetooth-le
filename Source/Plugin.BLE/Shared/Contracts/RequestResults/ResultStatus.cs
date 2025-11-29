@@ -13,7 +13,7 @@ public enum ResultStatus
 	UnspecifiedFailure,
 
 	/// <summary>
-	/// The device is known not to be in the requested state upon task completion. There is no ambiguity the operation failed, it wasn't canceled/timed out, or otherwise; and the reasoning is given.
+	/// The device is known not to be in the requested state upon task completion. There is no ambiguity the operation failed, it wasn't canceled/timed out, or otherwise; and the reasoning is specified.
 	/// </summary>
 	SpecifiedFailure
 }

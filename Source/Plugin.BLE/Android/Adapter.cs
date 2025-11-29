@@ -176,34 +176,17 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 
 		var ssb = new ScanSettings.Builder();
 		ssb.SetScanMode(ScanMode.ToNative());
+		ssb.SetMatchMode(ScanMatchMode.ToNative()); // set the match mode on Android 6 and above
 
-		#if NET6_0_OR_GREATER
-		if (OperatingSystem.IsAndroidVersionAtLeast(23))
-		#else
-		if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
-		#endif
+		// If set to aggressive, reduce the number of adverts needed before raising the DeviceFound callback
+		if (ScanMatchMode.ToNative() == BluetoothScanMatchMode.Aggressive)
 		{
-			// set the match mode on Android 6 and above
-			ssb.SetMatchMode(ScanMatchMode.ToNative());
-
-			// If set to aggressive, reduce the number of adverts needed before raising the DeviceFound callback
-			if (ScanMatchMode.ToNative() == BluetoothScanMatchMode.Aggressive)
-			{
-				// Be more aggressive when seeking adverts
-				ssb.SetNumOfMatches((int)BluetoothScanMatchNumber.OneAdvertisement);
-				Trace.Message("Using ScanMatchMode Aggressive");
-			}
+			// Be more aggressive when seeking adverts
+			ssb.SetNumOfMatches((int)BluetoothScanMatchNumber.OneAdvertisement);
+			Trace.Message("Using ScanMatchMode Aggressive");
 		}
 
-		#if NET6_0_OR_GREATER
-		if (OperatingSystem.IsAndroidVersionAtLeast(26))
-		#else
-		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-		#endif
-		{
-			// enable Bluetooth 5 Advertisement Extensions on Android 8.0 and above
-			ssb.SetLegacy(false);
-		}
+		ssb.SetLegacy(false); // enable Bluetooth 5 Advertisement Extensions on Android 8.0 and above
 		//ssb.SetCallbackType(ScanCallbackType.AllMatches);
 
 		if (_bluetoothAdapter.BluetoothLeScanner != null)
@@ -279,29 +262,9 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 
 	public override IReadOnlyList<IDevice> GetConnectedOrBondedDevicesByIds(Guid[] ids) => GetConnectedOrBondedDevices().Where(item => ids.Contains(item.Id)).ToList();
 
-	public override bool SupportsExtendedAdvertising()
-	{
-		#if NET6_0_OR_GREATER
-		if (OperatingSystem.IsAndroidVersionAtLeast(26))
-		#else
-		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-		#endif
-			return _bluetoothAdapter.IsLeExtendedAdvertisingSupported;
-		else
-			return false;
-	}
+	public override bool SupportsExtendedAdvertising() => _bluetoothAdapter.IsLeExtendedAdvertisingSupported;
 
-	public override bool SupportsCodedPhy()
-	{
-		#if NET6_0_OR_GREATER
-		if (OperatingSystem.IsAndroidVersionAtLeast(26))
-		#else
-		if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
-		#endif
-			return _bluetoothAdapter.IsLeCodedPhySupported;
-		else
-			return false;
-	}
+	public override bool SupportsCodedPhy() => _bluetoothAdapter.IsLeCodedPhySupported;
 
 
 	private class DeviceComparer : IEqualityComparer<BluetoothDevice>
@@ -324,8 +287,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 	public Task<IResult> Bond(IDevice device, BondingOptions bondingOptions = null, CancellationToken cancellationToken = default)
 	{
 		// ToDo: should these return a failed result instead?
-		if (device == null)
-			throw new ArgumentNullException(nameof(device));
+		ArgumentNullException.ThrowIfNull(device);
 
 		if (device.NativeDevice is not BluetoothDevice nativeDevice)
 			throw new ArgumentException($"{device.NativeDevice} native device is invalid");
@@ -419,11 +381,7 @@ public class Adapter : AdapterBase, IBondReport, IBondRequest
 				records.Add(new AdvertisementRecord(AdvertisementRecordType.ServiceData, result.ScanRecord.ServiceData));
 			}*/
 
-			#if NET6_0_OR_GREATER
 			var device = new Device(adapter, result.Device, null, result.ScanRecord?.GetBytes(), !OperatingSystem.IsAndroidVersionAtLeast(26) || result.IsConnectable);
-			#else
-			var device = new Device(adapter, result.Device, null, result.ScanRecord?.GetBytes(), Build.VERSION.SdkInt < BuildVersionCodes.O || result.IsConnectable);
-			#endif
 			device.Rssi.Timestamp = DateTime.Now;
 			device.Rssi.Value = result.Rssi is < 0 and >= sbyte.MinValue ? (sbyte)result.Rssi : default;
 			//Device device;

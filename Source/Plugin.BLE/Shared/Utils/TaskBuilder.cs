@@ -2,6 +2,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 
+using Plugin.BLE.Shared.Contracts.RequestResults;
+
+
 namespace Plugin.BLE.Abstractions.Utils;
 
 /// <summary>
@@ -61,6 +64,41 @@ public static class TaskBuilder
 			unsubscribeComplete(handler);
 		}
 	}
+
+	/*public static async Task<IResult> FromEventX<IResult, TEventHandler, TRejectHandler>(
+		Action execute,
+		Func<Action<IResult>, Action<IResult>, TEventHandler> getCompleteHandler,
+		Action<TEventHandler> subscribeComplete,
+		Action<TEventHandler> unsubscribeComplete,
+		Func<Action<Exception>, TRejectHandler> getRejectHandler,
+		Action<TRejectHandler> subscribeReject,
+		Action<TRejectHandler> unsubscribeReject,
+		CancellationToken token = default,
+		bool mainThread = true)
+	{
+		TaskCompletionSource<TReturn> tcs = new();
+		void Complete(TReturn args) => tcs.TrySetResult(args);
+		void CompleteException(Exception ex) => tcs.TrySetException(ex);
+		void Reject(Exception ex) => tcs.TrySetException(ex);
+
+		var handler = getCompleteHandler(Complete, CompleteException);
+		var rejectHandler = getRejectHandler(Reject);
+
+		try
+		{
+			subscribeComplete(handler);
+			subscribeReject(rejectHandler);
+			using (token.Register(() => tcs.TrySetCanceled(), false))
+			{
+				return await SafeEnqueueAndExecute(execute, token, tcs, mainThread).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			unsubscribeReject(rejectHandler);
+			unsubscribeComplete(handler);
+		}
+	}*/
 
 	/// <summary>
 	/// Queues the given <see cref="Action"/> onto the main thread and executes it.

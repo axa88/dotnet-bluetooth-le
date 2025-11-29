@@ -6,87 +6,61 @@ using System;
 using System.Threading.Tasks;
 using Windows.Devices.Radios;
 
+
 namespace Plugin.BLE
 {
-    public class BleImplementation : BleImplementationBase
-    {
-        private BluetoothAdapter btAdapter;
-        private Radio radio;
-        private bool isInitialized = false;
+	public class BleImplementation : BleImplementationBase
+	{
+		private BluetoothAdapter _btAdapter;
+		private Radio _radio;
+		private bool _isInitialized;
 
-        public static BluetoothCacheMode CacheModeCharacteristicRead { get; set; } = BluetoothCacheMode.Uncached;
-        public static BluetoothCacheMode CacheModeDescriptorRead { get; set; } = BluetoothCacheMode.Uncached;
-        public static BluetoothCacheMode CacheModeGetDescriptors { get; set; } = BluetoothCacheMode.Cached;
-        public static BluetoothCacheMode CacheModeGetCharacteristics { get; set; } = BluetoothCacheMode.Cached;
-        public static BluetoothCacheMode CacheModeGetServices { get; set; } = BluetoothCacheMode.Cached;
+		public static BluetoothCacheMode CacheModeCharacteristicRead { get; set; } = BluetoothCacheMode.Uncached;
+		public static BluetoothCacheMode CacheModeDescriptorRead { get; set; } = BluetoothCacheMode.Uncached;
+		public static BluetoothCacheMode CacheModeGetDescriptors { get; set; } = BluetoothCacheMode.Cached;
+		public static BluetoothCacheMode CacheModeGetCharacteristics { get; set; } = BluetoothCacheMode.Cached;
+		public static BluetoothCacheMode CacheModeGetServices { get; set; } = BluetoothCacheMode.Cached;
 
-        protected override IAdapter CreateNativeAdapter()
-        {
-            return new Adapter(btAdapter);
-        }
+		protected override IAdapter CreateNativeAdapter() => new Adapter(_btAdapter);
 
-        protected override BluetoothState GetInitialStateNative()
-        {
-            if (!isInitialized)
-            {
-                return BluetoothState.Unknown;
-            }
-            if (!btAdapter.IsLowEnergySupported)
-            {
-                return BluetoothState.Unavailable;
-            }
-            return ToBluetoothState(radio.State);
-        }
+		protected override BluetoothState GetInitialStateNative()
+			=> !_isInitialized ? BluetoothState.Unknown : !_btAdapter.IsLowEnergySupported ? BluetoothState.Unavailable : ToBluetoothState(_radio.State);
 
-        private static BluetoothState ToBluetoothState(RadioState radioState)
-        {
-            switch (radioState)
-            {
-                case RadioState.On:
-                    return BluetoothState.On;
-                case RadioState.Off:
-                    return BluetoothState.Off;
-                default:
-                    return BluetoothState.Unavailable;
-            }
-        }
+		private static BluetoothState ToBluetoothState(RadioState radioState)
+			=> radioState switch
+			{
+				RadioState.On => BluetoothState.On,
+				RadioState.Off => BluetoothState.Off,
+				_ => BluetoothState.Unavailable
+			};
 
-        private void Radio_StateChanged(Radio radio, object args)
-        {
-            State = ToBluetoothState(radio.State);
-        }
+		private void RadioStateChanged(Radio radio, object args) => State = ToBluetoothState(radio.State);
 
-        protected override void InitializeNative()
-        {
-            try
-            {
-                btAdapter = BluetoothAdapter.GetDefaultAsync().AsTask().Result;
-                radio = btAdapter.GetRadioAsync().AsTask().Result;
-                radio.StateChanged += Radio_StateChanged;
-                isInitialized = true;
-            }
-            catch (Exception ex)
-            {
-                Trace.Message("InitializeNative exception:{0}", ex.Message);
-            }
-        }
+		protected override void InitializeNative()
+		{
+			try
+			{
+				_btAdapter = BluetoothAdapter.GetDefaultAsync().AsTask().Result;
+				_radio = _btAdapter.GetRadioAsync().AsTask().Result;
+				_radio.StateChanged += RadioStateChanged;
+				_isInitialized = true;
+			}
+			catch (Exception ex) { Trace.Message("InitializeNative exception:{0}", ex.Message); }
+		}
 
-        public override async Task<bool> TrySetStateAsync(bool on)
-        {
-            if (!isInitialized)
-            {
-                return false;
-            }
-            try
-            {
-                return await radio.SetStateAsync(on ? RadioState.On : RadioState.Off) == RadioAccessStatus.Allowed;
-            }
-            catch (Exception ex)
-            {
-                Trace.Message("TrySetStateAsync exception: {0}", ex.Message);
-                return false;
-            }
-        }
-    }
-
+		public override async Task<bool> TrySetStateAsync(bool on)
+		{
+			if (!_isInitialized)
+				return false;
+			try
+			{
+				return await _radio.SetStateAsync(on ? RadioState.On : RadioState.Off) == RadioAccessStatus.Allowed;
+			}
+			catch (Exception ex)
+			{
+				Trace.Message("TrySetStateAsync exception: {0}", ex.Message);
+				return false;
+			}
+		}
+	}
 }

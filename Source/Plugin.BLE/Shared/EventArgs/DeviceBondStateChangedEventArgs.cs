@@ -1,21 +1,17 @@
 using Plugin.BLE.Abstractions.Contracts;
 
 
-namespace Plugin.BLE.Abstractions.EventArgs
+namespace Plugin.BLE.Abstractions.EventArgs;
+
+public class DeviceBondStateChangedEventArgs(IDevice device, string address, DeviceBondState state) : DeviceEventArgs(device)
 {
 	/// <summary>
-	/// Event arguments for <see cref="BondStatusBroadcastReceiver.BondStateChanged"/>
+	/// The device address.
 	/// </summary>
-	public class DeviceBondStateChangedEventArgs(IDevice device, string address, DeviceBondState state) : DeviceEventArgs(device)
-	{
-		/// <summary>
-		/// The device address.
-		/// </summary>
-		public string Address => address;
+	public string Address => address;
 
-		/// <summary>
-		/// The bond state.
-		/// </summary>
-		public DeviceBondState State => state;
-	}
+	/// <summary>
+	/// The bond state.
+	/// </summary>
+	public DeviceBondState State => state;
 }

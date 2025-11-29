@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 
 using Plugin.BLE.Abstractions.EventArgs;
 using Plugin.BLE.Abstractions.Exceptions;
-using Plugin.BLE.Shared.Contracts.RequestResults;
 
 
 namespace Plugin.BLE.Abstractions.Contracts;
@@ -199,16 +198,4 @@ public interface IAdapter
 	/// </summary>
 	/// <returns><c>true</c> if extended advertising is supported, otherwise <c>false</c>.</returns>
 	bool SupportsCodedPhy();
-}
-
-
-public interface IConnecting
-{
-}
-
-
-public interface IConnectRequest
-{
-	Task<IResult> ConnectToDeviceById(Guid id, ConnectParameters connectParameters = default, CancellationToken cancellationToken = default);
-
 }

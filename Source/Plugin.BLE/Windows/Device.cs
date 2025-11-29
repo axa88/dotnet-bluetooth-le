@@ -11,14 +11,15 @@ using Windows.Devices.Bluetooth.GenericAttributeProfile;
 using Plugin.BLE.Abstractions;
 using Plugin.BLE.Abstractions.Contracts;
 using Plugin.BLE.Extensions;
-using Plugin.BLE.Shared.Contracts.Pairing;
+using Plugin.BLE.Shared.Contracts.Connection;
+using Plugin.BLE.Shared.Contracts.Connection.Device;
 using Plugin.BLE.Shared.Contracts.Pairing.Device;
+using Plugin.BLE.Shared.Contracts.RequestResults;
 using Plugin.BLE.Shared.Contracts.Rssi;
-
 
 namespace Plugin.BLE.Windows;
 
-public class Device : DeviceBase<BluetoothLEDevice>, IBondState
+public class Device : DeviceBase<BluetoothLEDevice>, IBondState,  IConnectProcess
 {
 	private GattSession _gattSession;
 	private bool _isDisposed;
@@ -28,7 +29,7 @@ public class Device : DeviceBase<BluetoothLEDevice>, IBondState
 		Id = id;
 		Rssi = new RssiBase();
 		Name = !string.IsNullOrWhiteSpace(name) ? name : Name;
-		NativeDevice = BluetoothLEDevice.FromBluetoothAddressAsync(id.ToBleAddress()).GetAwaiter().GetResult(); // ToDO deal with this
+		NativeDevice = BluetoothLEDevice.FromBluetoothAddressAsync(id.ToBleAddress()).GetAwaiter().GetResult(); // ToDo deal with this
 		if (NativeDevice != null)
 		{
 			DeviceId = NativeDevice.DeviceId;
@@ -54,6 +55,40 @@ public class Device : DeviceBase<BluetoothLEDevice>, IBondState
 	public override bool UpdateConnectionParameters(ConnectParameters connectParameters = default) => RequestPreferredConnectionParameters(NativeDevice, connectParameters);
 
 	public DeviceBondState BondState => !IsConnectable ? DeviceBondState.NotSupported : IsBonded ? DeviceBondState.Bonded : DeviceBondState.NotBonded;
+
+	async Task<IResult> IConnectProcess.ConnectInternalX(ConnectParameters connectParameters, CancellationToken cancellationToken)
+	{
+		if (SupportsIsConnectable && !IsConnectable)
+			return await Task.FromResult(new ConnectionResult(ResultStatus.SpecifiedFailure, "Device is reporting as not supporting Connections")).ConfigureAwait(false);
+
+		try
+		{
+			_gattSession = await GattSession.FromDeviceIdAsync(BluetoothDeviceId.FromId(DeviceId)).AsTask(cancellationToken).ConfigureAwait(false);
+			if (_gattSession is not null)
+			{
+				_gattSession.MaintainConnection = true;
+				_gattSession.SessionStatusChanged += OnGattSessionStatusChanged;
+				_gattSession.MaxPduSizeChanged += OnGattSessionMaxPduSizeChanged;
+
+				RequestPreferredConnectionParameters(NativeDevice, connectParameters);
+			}
+		}
+		catch (Exception e)
+		{
+			DisposeGattSession();
+			Trace.Message(e.Message);
+			return new ConnectionResult(ResultStatus.SpecifiedFailure, e.Message);
+		}
+
+		if (_gattSession is null)
+		{
+			const string connectionCouldNotCreateAGattSession = "Connection could not create a GattSession";
+			Trace.Message(connectionCouldNotCreateAGattSession);
+			return new ConnectionResult(ResultStatus.SpecifiedFailure, connectionCouldNotCreateAGattSession);
+		}
+
+		return new ConnectionResult(ResultStatus.Success);
+	}
 
 	protected internal async Task<bool> ConnectInternal(ConnectParameters connectParameters, CancellationToken cancellationToken)
 	{

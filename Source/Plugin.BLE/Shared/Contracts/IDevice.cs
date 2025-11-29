@@ -53,7 +53,7 @@ public interface IDevice : IDisposable
 	/// if so the limited state should not be used
 	/// 
 	/// On Android each Device instance can create its own Gatt, therefore connection is at an individual Device level.
-	/// Therefore a connection means if a particular Device has communication on its own Gatt.
+	/// Therefore, a connection means if a particular Device has communication on its own Gatt.
 	/// Here the Limited state has no meaning, it should simply be disconnected
 	/// 
 	/// if the above proves true, then eliminate the contrived <cref>DeviceState.Limited</cref> state
@@ -67,7 +67,7 @@ public interface IDevice : IDisposable
 	/// </summary>
 	/// <remarks>
 	/// Important:
-	/// On Android: This function will only work with API level 21 and higher. Other API level will return false as function result.
+	/// On Android: Starting from API level 34, this always requests an MTU of 517 (and the requested value is ignored).
 	/// On iOS: Updating the connection interval is not supported by iOS. The function simply returns false.
 	/// </remarks>
 	/// <returns>True if the update request was successful. On iOS, it will always return false.</returns>

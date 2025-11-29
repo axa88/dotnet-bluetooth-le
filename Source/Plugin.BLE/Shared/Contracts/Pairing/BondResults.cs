@@ -17,7 +17,7 @@ public class BondResult(ResultStatus status, string detail = "") : IResult
 }
 
 /// <summary>
-/// The final results of the Bond Request made on Windows
+/// The final results of a manual/custom Bond Request. As when the Pairing process is not handled automatically by the OS's UI
 /// </summary>
 /// <param name="status"> Result status. This depends on platforms cooperation in reporting.
 /// In addition to success, Windows and Android to a lesser extent may report information on failure </param>

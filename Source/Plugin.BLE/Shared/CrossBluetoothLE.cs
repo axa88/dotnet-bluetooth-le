@@ -1,46 +1,29 @@
 ﻿using System;
-using Plugin.BLE.Abstractions;
+
 using Plugin.BLE.Abstractions.Contracts;
+
 
 namespace Plugin.BLE
 {
-    /// <summary>
-    /// Cross platform bluetooth LE implemenation.
-    /// </summary>
-    public static class CrossBluetoothLE
-    {
-        static readonly Lazy<IBluetoothLE> Implementation = new Lazy<IBluetoothLE>(CreateImplementation, System.Threading.LazyThreadSafetyMode.PublicationOnly);
+	/// <summary>
+	/// Cross-platform bluetooth LE implementation.
+	/// </summary>
+	public static class CrossBluetoothLE
+	{
+		private static readonly Lazy<IBluetoothLE> Implementation = new(CreateImplementation, System.Threading.LazyThreadSafetyMode.PublicationOnly);
 
-        /// <summary>
-        /// Current bluetooth LE implementation.
-        /// </summary>
-        public static IBluetoothLE Current
-        {
-            get
-            {
-                var ret = Implementation.Value;
-                if (ret == null)
-                {
-                    throw NotImplementedInReferenceAssembly();
-                }
-                return ret;
-            }
-        }
+		/// <summary>
+		/// Current bluetooth LE implementation.
+		/// </summary>
+		public static IBluetoothLE Current => Implementation.Value ?? throw NotImplementedInReferenceAssembly();
 
-        static IBluetoothLE CreateImplementation()
-        {
-#if NETSTANDARD
-            return null;
-#else
-            var implementation = new BleImplementation();
-            implementation.Initialize();
-            return implementation;
-#endif
-        }
+		private static IBluetoothLE CreateImplementation()
+		{
+			var implementation = new BleImplementation();
+			implementation.Initialize();
+			return implementation;
+		}
 
-        internal static Exception NotImplementedInReferenceAssembly()
-        {
-            return new NotImplementedException("This functionality is not implemented in the portable version of this assembly.  You should reference the NuGet package from your main application project in order to reference the platform-specific implementation.");
-        }
-    }
+		private static Exception NotImplementedInReferenceAssembly() => new NotImplementedException("This functionality is not implemented in the portable version of this assembly.  You should reference the NuGet package from your main application project in order to reference the platform-specific implementation.");
+	}
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Threading.Tasks;
 
 using Android.App;
@@ -28,23 +27,9 @@ namespace Plugin.BLE
 		/// </summary>
 		public static bool ShouldQueueOnMainThread { get; set; } = true;
 
-		private static bool IsMainThread
-		{
-			get
-			{
-				#if NET6_0_OR_GREATER
-				if (OperatingSystem.IsAndroidVersionAtLeast(23))
-				#else
-				if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
-				#endif
-					return Looper.MainLooper.IsCurrentThread;
-
-				return Looper.MyLooper() == Looper.MainLooper;
-			}
-		}
+		private static bool IsMainThread => Looper.MainLooper is { IsCurrentThread: true };
 
 		private BluetoothManager _bluetoothManager;
-
 
 		protected override void InitializeNative()
 		{
@@ -59,16 +44,14 @@ namespace Plugin.BLE
 
 			if (ShouldQueueOnMainThread)
 			{
-				TaskBuilder.MainThreadInvoker = action =>
+				TaskBuilder.MainThreadInvoker = static action =>
 				{
 
 					if (IsMainThread)
 						action();
 					else
 					{
-						if (_handler == null)
-							_handler = new(Looper.MainLooper);
-
+						_handler ??= new(Looper.MainLooper);
 						_handler.Post(action);
 					}
 				};

@@ -417,44 +417,41 @@ public class Device : DeviceBase<BluetoothDevice>, IBondState
 	}*/
 
 	protected override async Task<int> RequestMtuNativeAsync(int requestValue, CancellationToken cancellationToken)
+	{
+		if (Gatt == null || _gattCallback == null)
 		{
-			if (Gatt == null || _gattCallback == null)
-			{
-				Trace.Message("You can't request a MTU for disconnected devices. Device is {0}", State);
-				return -1;
-			}
-
-		if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop)
-		{
-			Trace.Message($"Request MTU not supported in this Android API level");
+			Trace.Message("You can't request a MTU for disconnected devices. Device is {0}", State);
 			return -1;
 		}
 
-			return await TaskBuilder.FromEvent<int, EventHandler<MtuRequestCallbackEventArgs>, EventHandler>(
-			  execute: () => Gatt.RequestMtu(requestValue),
-			  getCompleteHandler: (complete, reject) => (sender, args) =>
-			  {
-				   if (args.Error != null)
-				   {
-					   Trace.Message($"Failed to request MTU ({requestValue}) for device {Id}-{Name}. {args.Error.Message}");
-					   reject(new Exception($"Request MTU error: {args.Error.Message}"));
-				   }
-				   else
-				   {
-					   complete(args.Mtu);
-				   }
-			  },
-			  subscribeComplete: handler => _gattCallback.MtuRequested += handler,
-			  unsubscribeComplete: handler => _gattCallback.MtuRequested -= handler,
-			  getRejectHandler: reject => (sender, args) =>
-			  {
-				   reject(new Exception($"Device {Name} disconnected while requesting MTU."));
-			  },
-			  subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
-			  unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
-			  token: cancellationToken
-			);
-		}
+		if (requestValue is < 23 or > 517)
+			throw new ArgumentOutOfRangeException(nameof(requestValue), requestValue, "Requested MTU value may not be smaller than 23 and not larger than 517");
+
+		return await TaskBuilder.FromEvent<int, EventHandler<MtuRequestCallbackEventArgs>, EventHandler>(
+			execute: () => Gatt.RequestMtu(requestValue),
+			getCompleteHandler: (complete, reject) => (sender, args) =>
+			{
+				if (args.Error != null)
+				{
+					Trace.Message($"Failed to request MTU ({requestValue}) for device {Id}-{Name}. {args.Error.Message}");
+					reject(new Exception($"Request MTU error: {args.Error.Message}"));
+				}
+				else
+				{
+					complete(args.Mtu);
+				}
+			},
+			subscribeComplete: handler => _gattCallback.MtuRequested += handler,
+			unsubscribeComplete: handler => _gattCallback.MtuRequested -= handler,
+			getRejectHandler: reject => (sender, args) =>
+			{
+				reject(new Exception($"Device {Name} disconnected while requesting MTU."));
+			},
+			subscribeReject: handler => _gattCallback.ConnectionInterrupted += handler,
+			unsubscribeReject: handler => _gattCallback.ConnectionInterrupted -= handler,
+			token: cancellationToken
+		);
+	}
 
 	protected override bool UpdateConnectionIntervalNative(ConnectionInterval interval)
 	{
